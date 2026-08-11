@@ -41,5 +41,26 @@ Para cada caso se debe conservar al menos una evidencia cuando corresponda:
 
 ## Resultado general
 
-Estado: Pendiente de ejecución.
+## Ejecución 1
 
+**Fecha:** 11/08/2026  
+**Solicitud utilizada:** #3 — Proyector del aula no enciende  
+**Ambiente:** Local  
+**Resultado:** APROBADO
+
+| ID | Resultado | Evidencia observada |
+|---|---|---|
+| ST-01 | PASS | Inicio de sesión correcto como solicitante |
+| ST-02 | PASS | Solicitud #3 creada con estado Pendiente y prioridad Media |
+| ST-03 | PASS | Administrador cambió prioridad a Alta y asignó Técnico NovaTech |
+| ST-04 | PASS | Técnico inició la solicitud y el estado cambió a En proceso |
+| ST-05 | PASS | Comentario técnico registrado y visible en el historial |
+| ST-06 | PASS | Técnico finalizó la solicitud correctamente |
+| ST-07 | PASS | Administrador cerró la solicitud y quedó en solo lectura |
+| ST-08 | PASS | Historial mostró creación, cambios, comentario, finalización y cierre en orden cronológico |
+
+**8 de 8 pruebas aprobadas.**
+
+No se identificaron defectos bloqueantes ni críticos durante esta ejecución.
+
+La prueba de humo interna se considera **APROBADA**.

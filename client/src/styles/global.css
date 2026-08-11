@@ -640,6 +640,17 @@ select:focus {
   line-height: 1.5;
 }
 
+.comment-box .button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+
+.comment-box .button:not(:disabled) {
+  opacity: 1;
+  cursor: pointer;
+}
+
 @media (max-width: 650px) {
   .history-summary {
     grid-template-columns: 1fr;

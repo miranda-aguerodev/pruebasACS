@@ -1,7 +1,7 @@
-import { createContext, useEffect, useState } from "react";
-import { login as loginRequest } from "../services/authService";
+import { useEffect, useState } from "react";
 
-export const AuthContext = createContext(null);
+import { login as loginRequest } from "../services/authService";
+import { AuthContext } from "./authContext";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -18,7 +18,10 @@ export function AuthProvider({ children }) {
   }, []);
 
   async function login(email, password) {
-    const authenticatedUser = await loginRequest(email, password);
+    const authenticatedUser = await loginRequest(
+      email,
+      password
+    );
 
     localStorage.setItem(
       "novatech_user",

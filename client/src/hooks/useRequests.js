@@ -1,4 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+
 import { getRequests } from "../services/requestService";
 
 export function useRequests(filters = {}) {
@@ -6,12 +11,16 @@ export function useRequests(filters = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  const filtersKey = JSON.stringify(filters);
+
   const loadRequests = useCallback(async () => {
     try {
       setLoading(true);
       setError("");
 
-      const data = await getRequests(filters);
+      const currentFilters = JSON.parse(filtersKey);
+
+      const data = await getRequests(currentFilters);
 
       setRequests(data);
     } catch (err) {
@@ -19,7 +28,7 @@ export function useRequests(filters = {}) {
     } finally {
       setLoading(false);
     }
-  }, [JSON.stringify(filters)]);
+  }, [filtersKey]);
 
   useEffect(() => {
     loadRequests();

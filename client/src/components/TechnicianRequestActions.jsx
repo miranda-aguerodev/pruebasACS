@@ -23,7 +23,6 @@ export default function TechnicianRequestActions({
         estado: status,
         usuario_id: user.id,
       });
-    
 
       await onUpdated();
     } catch (error) {
@@ -34,7 +33,9 @@ export default function TechnicianRequestActions({
   }
 
   async function handleComment() {
-    if (!comment.trim()) return;
+    if (!comment.trim()) {
+      return;
+    }
 
     try {
       setSaving(true);
@@ -58,9 +59,10 @@ export default function TechnicianRequestActions({
     request.estado === "finalizada" ||
     request.estado === "cerrada";
 
+  const isCommentEmpty = !comment.trim();
+
   return (
     <div className="technician-actions">
-
       {request.estado === "pendiente" && (
         <button
           className="button button-primary button-small"
@@ -95,10 +97,15 @@ export default function TechnicianRequestActions({
 
           <button
             className="button button-secondary button-small"
-            disabled={saving || !comment.trim()}
+            disabled={saving || isCommentEmpty}
             onClick={handleComment}
+            title={
+              isCommentEmpty
+                ? "Escriba un comentario para habilitar esta acción"
+                : "Registrar comentario"
+            }
           >
-            Comentar
+            {saving ? "Guardando..." : "Comentar"}
           </button>
         </div>
       )}
@@ -110,7 +117,6 @@ export default function TechnicianRequestActions({
       )}
 
       <RequestHistory request={request} />
-
     </div>
   );
 }
