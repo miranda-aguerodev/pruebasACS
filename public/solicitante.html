@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NovaTech | Nueva solicitud</title>
+</head>
+
+<body>
+
+  <main>
+    <h1>NovaTech</h1>
+    <p>Sistema de Gestión de Solicitudes de Mantenimiento</p>
+
+    <section>
+      <h2>Registrar nueva solicitud</h2>
+
+      <form action="/solicitudes" method="POST">
+
+        <div>
+          <label for="descripcion">Descripción del problema</label>
+          <textarea
+            id="descripcion"
+            name="descripcion"
+            required
+          ></textarea>
+        </div>
+
+        <div>
+          <label for="ubicacion">Ubicación</label>
+          <input
+            type="text"
+            id="ubicacion"
+            name="ubicacion"
+            placeholder="Ejemplo: Aula 203"
+            required
+          >
+        </div>
+
+        <div>
+          <label for="categoria">Categoría</label>
+          <select id="categoria" name="categoria" required>
+            <option value="">Seleccione una categoría</option>
+            <option value="Electricidad">Electricidad</option>
+            <option value="Climatización">Climatización</option>
+            <option value="Tecnología">Tecnología</option>
+            <option value="Plomería">Plomería</option>
+            <option value="Mobiliario">Mobiliario</option>
+            <option value="Otro">Otro</option>
+          </select>
+        </div>
+
+        <input
+          type="hidden"
+          name="solicitante_id"
+          value="3"
+        >
+
+        <button type="submit">Registrar solicitud</button>
+
+      </form>
+    </section>
+
+  </main>
+
+</body>
+</html>

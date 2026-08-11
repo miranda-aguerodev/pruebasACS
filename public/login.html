@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NovaTech | Iniciar sesión</title>
+</head>
+
+<body>
+
+  <main>
+    <h1>NovaTech</h1>
+    <p>Sistema de Gestión de Solicitudes de Mantenimiento</p>
+
+    <form action="/login" method="POST">      <div>
+        <label for="email">Correo electrónico</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="correo@novatech.com"
+          required
+        >
+      </div>
+
+      <div>
+        <label for="password">Contraseña</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="Ingrese su contraseña"
+          required
+        >
+      </div>
+
+      <button type="submit">Iniciar sesión</button>
+    </form>
+  </main>
+
+</body>
+</html>

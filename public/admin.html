@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NovaTech | Administrador</title>
+</head>
+
+<script>
+  fetch("/solicitudes")
+    .then(response => response.json())
+    .then(solicitudes => {
+      const tabla = document.getElementById("tabla-solicitudes");
+
+      solicitudes.forEach(solicitud => {
+        const fila = document.createElement("tr");
+
+        fila.innerHTML = `
+          <td>${solicitud.id}</td>
+          <td>${solicitud.descripcion}</td>
+          <td>${solicitud.ubicacion}</td>
+          <td>${solicitud.categoria}</td>
+          <td>${solicitud.prioridad}</td>
+          <td>${solicitud.estado}</td>
+          <td>${solicitud.tecnico || "Sin asignar"}</td>
+          <td>
+            <button onclick="editarSolicitud(${solicitud.id})">
+              Editar
+            </button>
+          </td>
+        `;
+
+        tabla.appendChild(fila);
+      });
+    })
+    .catch(error => {
+      console.error("Error al cargar solicitudes:", error);
+    });
+
+    function editarSolicitud(id) {
+  alert(`Editar solicitud #${id}`);
+}
+</script>
+
+<body>
+
+  <main>
+    <h1>Panel de Administración</h1>
+    <p>Gestión de solicitudes de mantenimiento</p>
+
+    <section>
+      <h2>Solicitudes</h2>
+
+      <table border="1">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Descripción</th>
+          <th>Ubicación</th>
+          <th>Categoría</th>
+          <th>Prioridad</th>
+          <th>Estado</th>
+          <th>Técnico</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+
+        <tbody id="tabla-solicitudes">
+        </tbody>
+      </table>
+    </section>
+  </main>
+
+</body>
+</html>
