@@ -42,3 +42,26 @@ export function getComments(id) {
 export function getHistory(id) {
   return apiRequest(`/api/solicitudes/${id}/historial`);
 }
+
+// =============================
+// GESTIÓN DE USUARIOS
+// HU-02
+// =============================
+
+export function getUsers() {
+  return apiRequest("/api/usuarios");
+}
+
+export function createUser(data) {
+  return apiRequest("/api/usuarios", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export function updateUser(id, data) {
+  return apiRequest(`/api/usuarios/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+}

@@ -9,6 +9,12 @@ const PORT = 3000;
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
+const VALID_ROLES = [
+  "administrador",
+  "tecnico",
+  "solicitante",
+];
+
 if (!JWT_SECRET) {
   throw new Error(
     "JWT_SECRET no está configurado en el archivo .env"
@@ -17,6 +23,38 @@ if (!JWT_SECRET) {
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// =============================
+// HELPERS
+// =============================
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function normalizeActive(value) {
+  if (
+    value === true ||
+    value === 1 ||
+    value === "1"
+  ) {
+    return 1;
+  }
+
+  if (
+    value === false ||
+    value === 0 ||
+    value === "0"
+  ) {
+    return 0;
+  }
+
+  return null;
+}
+
+function isAdmin(req) {
+  return req.user.rol === "administrador";
+}
 
 // =============================
 // AUTENTICACIÓN JWT
@@ -50,8 +88,63 @@ function authenticateToken(req, res, next) {
         });
       }
 
-      req.user = decoded;
-      next();
+      const userSql = `
+        SELECT
+          id,
+          email,
+          rol,
+          activo
+        FROM usuarios
+        WHERE id = ?
+        LIMIT 1
+      `;
+
+      db.query(
+        userSql,
+        [decoded.id],
+        (userError, results) => {
+          if (userError) {
+            console.error(userError);
+
+            return res.status(500).json({
+              error:
+                "Error al validar la sesión",
+            });
+          }
+
+          if (results.length === 0) {
+            return res.status(403).json({
+              error:
+                "La cuenta asociada al token ya no existe",
+            });
+          }
+
+          const currentUser = results[0];
+
+          if (!currentUser.activo) {
+            return res.status(403).json({
+              error:
+                "La cuenta está desactivada",
+            });
+          }
+
+          /*
+           * Se utiliza el rol actual almacenado
+           * en la base de datos.
+           *
+           * Así, un cambio de rol o una
+           * desactivación tienen efecto inmediato,
+           * aunque exista un JWT anterior.
+           */
+          req.user = {
+            id: currentUser.id,
+            email: currentUser.email,
+            rol: currentUser.rol,
+          };
+
+          next();
+        }
+      );
     }
   );
 }
@@ -128,8 +221,16 @@ app.post("/api/login", (req, res) => {
     });
   }
 
+  const normalizedEmail =
+    email.trim().toLowerCase();
+
   const sql = `
-    SELECT id, nombre, email, rol
+    SELECT
+      id,
+      nombre,
+      email,
+      rol,
+      activo
     FROM usuarios
     WHERE email = ? AND password = ?
     LIMIT 1
@@ -137,7 +238,7 @@ app.post("/api/login", (req, res) => {
 
   db.query(
     sql,
-    [email, password],
+    [normalizedEmail, password],
     (error, resultados) => {
       if (error) {
         console.error(error);
@@ -149,11 +250,18 @@ app.post("/api/login", (req, res) => {
 
       if (resultados.length === 0) {
         return res.status(401).json({
-          error: "Correo o contraseña incorrectos",
+          error:
+            "Correo o contraseña incorrectos",
         });
       }
 
       const user = resultados[0];
+
+      if (!user.activo) {
+        return res.status(403).json({
+          error: "La cuenta está desactivada",
+        });
+      }
 
       const token = jwt.sign(
         {
@@ -169,7 +277,10 @@ app.post("/api/login", (req, res) => {
       );
 
       res.json({
-        ...user,
+        id: user.id,
+        nombre: user.nombre,
+        email: user.email,
+        rol: user.rol,
         token,
       });
     }
@@ -183,12 +294,360 @@ app.post("/api/login", (req, res) => {
 app.use("/api", authenticateToken);
 
 // =============================
+// GESTIÓN DE USUARIOS
+// Solo Administrador
+// HU-02
+// =============================
+
+// Listar usuarios
+app.get("/api/usuarios", (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      error:
+        "Solo el administrador puede gestionar usuarios",
+    });
+  }
+
+  const sql = `
+    SELECT
+      id,
+      nombre,
+      email,
+      rol,
+      activo
+    FROM usuarios
+    ORDER BY nombre ASC
+  `;
+
+  db.query(sql, (error, results) => {
+    if (error) {
+      console.error(error);
+
+      return res.status(500).json({
+        error: "Error al consultar usuarios",
+      });
+    }
+
+    res.json(results);
+  });
+});
+
+// Crear usuario
+app.post("/api/usuarios", (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      error:
+        "Solo el administrador puede gestionar usuarios",
+    });
+  }
+
+  const {
+    nombre,
+    email,
+    password,
+    rol,
+  } = req.body;
+
+  const normalizedName =
+    typeof nombre === "string"
+      ? nombre.trim()
+      : "";
+
+  const normalizedEmail =
+    typeof email === "string"
+      ? email.trim().toLowerCase()
+      : "";
+
+  if (
+    !normalizedName ||
+    !normalizedEmail ||
+    !password ||
+    !rol
+  ) {
+    return res.status(400).json({
+      error:
+        "Nombre, correo, contraseña y rol son obligatorios",
+    });
+  }
+
+  if (normalizedName.length > 100) {
+    return res.status(400).json({
+      error:
+        "El nombre no puede superar los 100 caracteres",
+    });
+  }
+
+  if (
+    normalizedEmail.length > 120 ||
+    !isValidEmail(normalizedEmail)
+  ) {
+    return res.status(400).json({
+      error:
+        "El correo electrónico no es válido",
+    });
+  }
+
+  if (
+    typeof password !== "string" ||
+    password.length < 8 ||
+    password.length > 255
+  ) {
+    return res.status(400).json({
+      error:
+        "La contraseña debe tener entre 8 y 255 caracteres",
+    });
+  }
+
+  if (!VALID_ROLES.includes(rol)) {
+    return res.status(400).json({
+      error: "El rol indicado no es válido",
+    });
+  }
+
+  const sql = `
+    INSERT INTO usuarios
+      (
+        nombre,
+        email,
+        password,
+        rol,
+        activo
+      )
+    VALUES (?, ?, ?, ?, 1)
+  `;
+
+  db.query(
+    sql,
+    [
+      normalizedName,
+      normalizedEmail,
+      password,
+      rol,
+    ],
+    (error, result) => {
+      if (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+          return res.status(409).json({
+            error:
+              "Ya existe un usuario con ese correo electrónico",
+          });
+        }
+
+        console.error(error);
+
+        return res.status(500).json({
+          error: "Error al crear el usuario",
+        });
+      }
+
+      res.status(201).json({
+        message:
+          "Usuario creado correctamente",
+        user: {
+          id: result.insertId,
+          nombre: normalizedName,
+          email: normalizedEmail,
+          rol,
+          activo: 1,
+        },
+      });
+    }
+  );
+});
+
+// Editar, activar o desactivar usuario
+app.put("/api/usuarios/:id", (req, res) => {
+  if (!isAdmin(req)) {
+    return res.status(403).json({
+      error:
+        "Solo el administrador puede gestionar usuarios",
+    });
+  }
+
+  const userId = Number(req.params.id);
+
+  if (
+    !Number.isInteger(userId) ||
+    userId <= 0
+  ) {
+    return res.status(400).json({
+      error:
+        "Identificador de usuario inválido",
+    });
+  }
+
+  const {
+    nombre,
+    email,
+    password,
+    rol,
+    activo,
+  } = req.body;
+
+  const fields = [];
+  const values = [];
+
+  if (nombre !== undefined) {
+    const normalizedName =
+      typeof nombre === "string"
+        ? nombre.trim()
+        : "";
+
+    if (!normalizedName) {
+      return res.status(400).json({
+        error: "El nombre es obligatorio",
+      });
+    }
+
+    if (normalizedName.length > 100) {
+      return res.status(400).json({
+        error:
+          "El nombre no puede superar los 100 caracteres",
+      });
+    }
+
+    fields.push("nombre = ?");
+    values.push(normalizedName);
+  }
+
+  if (email !== undefined) {
+    const normalizedEmail =
+      typeof email === "string"
+        ? email.trim().toLowerCase()
+        : "";
+
+    if (
+      !normalizedEmail ||
+      normalizedEmail.length > 120 ||
+      !isValidEmail(normalizedEmail)
+    ) {
+      return res.status(400).json({
+        error:
+          "El correo electrónico no es válido",
+      });
+    }
+
+    fields.push("email = ?");
+    values.push(normalizedEmail);
+  }
+
+  if (password !== undefined) {
+    if (
+      typeof password !== "string" ||
+      password.length < 8 ||
+      password.length > 255
+    ) {
+      return res.status(400).json({
+        error:
+          "La contraseña debe tener entre 8 y 255 caracteres",
+      });
+    }
+
+    fields.push("password = ?");
+    values.push(password);
+  }
+
+  if (rol !== undefined) {
+    if (!VALID_ROLES.includes(rol)) {
+      return res.status(400).json({
+        error: "El rol indicado no es válido",
+      });
+    }
+
+    if (
+      userId === Number(req.user.id) &&
+      rol !== "administrador"
+    ) {
+      return res.status(400).json({
+        error:
+          "El administrador no puede cambiar su propio rol",
+      });
+    }
+
+    fields.push("rol = ?");
+    values.push(rol);
+  }
+
+  if (activo !== undefined) {
+    const normalizedActive =
+      normalizeActive(activo);
+
+    if (normalizedActive === null) {
+      return res.status(400).json({
+        error:
+          "El estado activo indicado no es válido",
+      });
+    }
+
+    if (
+      userId === Number(req.user.id) &&
+      normalizedActive === 0
+    ) {
+      return res.status(400).json({
+        error:
+          "El administrador no puede desactivar su propia cuenta",
+      });
+    }
+
+    fields.push("activo = ?");
+    values.push(normalizedActive);
+  }
+
+  if (fields.length === 0) {
+    return res.status(400).json({
+      error: "No hay datos para actualizar",
+    });
+  }
+
+  values.push(userId);
+
+  const sql = `
+    UPDATE usuarios
+    SET ${fields.join(", ")}
+    WHERE id = ?
+  `;
+
+  db.query(
+    sql,
+    values,
+    (error, result) => {
+      if (error) {
+        if (error.code === "ER_DUP_ENTRY") {
+          return res.status(409).json({
+            error:
+              "Ya existe un usuario con ese correo electrónico",
+          });
+        }
+
+        console.error(error);
+
+        return res.status(500).json({
+          error:
+            "Error al actualizar el usuario",
+        });
+      }
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          error: "Usuario no encontrado",
+        });
+      }
+
+      res.json({
+        message:
+          "Usuario actualizado correctamente",
+      });
+    }
+  );
+});
+
+// =============================
 // TÉCNICOS
 // Solo Administrador
 // =============================
 
 app.get("/api/tecnicos", (req, res) => {
-  if (req.user.rol !== "administrador") {
+  if (!isAdmin(req)) {
     return res.status(403).json({
       error:
         "No tiene permisos para consultar técnicos",
@@ -199,6 +658,7 @@ app.get("/api/tecnicos", (req, res) => {
     SELECT id, nombre, email
     FROM usuarios
     WHERE rol = 'tecnico'
+      AND activo = 1
     ORDER BY nombre
   `;
 
@@ -289,7 +749,8 @@ app.get("/api/solicitudes", (req, res) => {
       console.error(error);
 
       return res.status(500).json({
-        error: "Error al consultar solicitudes",
+        error:
+          "Error al consultar solicitudes",
       });
     }
 
@@ -366,7 +827,8 @@ app.post("/api/solicitudes", (req, res) => {
         );
 
         return res.status(500).json({
-          error: "Error al registrar la solicitud",
+          error:
+            "Error al registrar la solicitud",
         });
       }
 
@@ -442,7 +904,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
         console.error(currentError);
 
         return res.status(500).json({
-          error: "Error al consultar la solicitud",
+          error:
+            "Error al consultar la solicitud",
         });
       }
 
@@ -588,9 +1051,6 @@ app.put("/api/solicitudes/:id", (req, res) => {
             });
           }
 
-          // HU-10:
-          // El cierre normal de una solicitud finalizada
-          // requiere una observación final.
           if (
             current.estado === "finalizada" &&
             estado === "cerrada" &&
@@ -651,7 +1111,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
 
         if (fields.length === 0) {
           return res.status(400).json({
-            error: "No hay datos para actualizar",
+            error:
+              "No hay datos para actualizar",
           });
         }
 
@@ -676,7 +1137,9 @@ app.put("/api/solicitudes/:id", (req, res) => {
               });
             }
 
-            if (updateResult.affectedRows === 0) {
+            if (
+              updateResult.affectedRows === 0
+            ) {
               return res.status(404).json({
                 error:
                   "Solicitud no encontrada",
@@ -686,7 +1149,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
             const events = [];
 
             if (
-              req.user.rol === "administrador" &&
+              req.user.rol ===
+                "administrador" &&
               prioridad !== undefined &&
               prioridad !== current.prioridad
             ) {
@@ -696,7 +1160,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
             }
 
             if (
-              req.user.rol === "administrador" &&
+              req.user.rol ===
+                "administrador" &&
               tecnico_id !== undefined &&
               Number(tecnico_id) !==
                 Number(current.tecnico_id)
@@ -708,7 +1173,9 @@ app.put("/api/solicitudes/:id", (req, res) => {
                 events.push(
                   "Técnico desasignado"
                 );
-              } else if (!current.tecnico_id) {
+              } else if (
+                !current.tecnico_id
+              ) {
                 events.push(
                   "Técnico asignado"
                 );

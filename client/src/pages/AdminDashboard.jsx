@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -7,6 +8,7 @@ import {
 import AppLayout from "../components/AppLayout";
 import RequestTable from "../components/RequestTable";
 import AdminRequestActions from "../components/AdminRequestActions";
+import UserManagement from "../components/UserManagement";
 
 import { useRequests } from "../hooks/useRequests";
 
@@ -27,7 +29,8 @@ export default function AdminDashboard() {
     reload,
   } = useRequests();
 
-  const [technicians, setTechnicians] = useState([]);
+  const [technicians, setTechnicians] =
+    useState([]);
 
   const [filters, setFilters] = useState({
     estado: "",
@@ -35,18 +38,20 @@ export default function AdminDashboard() {
     tecnico_id: "",
   });
 
-  useEffect(() => {
-    async function loadTechnicians() {
+  const loadTechnicians =
+    useCallback(async () => {
       try {
         const data = await getTechnicians();
-        setTechnicians(data);
-      } catch (error) {
-        console.error(error);
-      }
-    }
 
+        setTechnicians(data);
+      } catch (requestError) {
+        console.error(requestError);
+      }
+    }, []);
+
+  useEffect(() => {
     loadTechnicians();
-  }, []);
+  }, [loadTechnicians]);
 
   function handleFilterChange(event) {
     const { name, value } = event.target;
@@ -77,7 +82,9 @@ export default function AdminDashboard() {
 
       let matchesTechnician = true;
 
-      if (filters.tecnico_id === "sin_asignar") {
+      if (
+        filters.tecnico_id === "sin_asignar"
+      ) {
         matchesTechnician =
           request.tecnico_id === null ||
           request.tecnico_id === undefined;
@@ -156,10 +163,15 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      <UserManagement
+        onUsersChanged={loadTechnicians}
+      />
+
       <section className="card">
         <div className="section-heading">
           <div>
             <h2>Reportes y filtros</h2>
+
             <p>
               Consulte solicitudes por estado,
               prioridad o responsable.
@@ -221,14 +233,16 @@ export default function AdminDashboard() {
                 Todas las prioridades
               </option>
 
-              {PRIORITIES.map((priority) => (
-                <option
-                  key={priority.value}
-                  value={priority.value}
-                >
-                  {priority.label}
-                </option>
-              ))}
+              {PRIORITIES.map(
+                (priority) => (
+                  <option
+                    key={priority.value}
+                    value={priority.value}
+                  >
+                    {priority.label}
+                  </option>
+                )
+              )}
             </select>
           </label>
 
@@ -252,14 +266,16 @@ export default function AdminDashboard() {
                 Sin asignar
               </option>
 
-              {technicians.map((technician) => (
-                <option
-                  key={technician.id}
-                  value={technician.id}
-                >
-                  {technician.nombre}
-                </option>
-              ))}
+              {technicians.map(
+                (technician) => (
+                  <option
+                    key={technician.id}
+                    value={technician.id}
+                  >
+                    {technician.nombre}
+                  </option>
+                )
+              )}
             </select>
           </label>
 
@@ -301,10 +317,12 @@ export default function AdminDashboard() {
 
         {loading ? (
           <p>Cargando solicitudes...</p>
-        ) : filteredRequests.length === 0 ? (
+        ) : filteredRequests.length ===
+          0 ? (
           <div className="empty-state">
-            No hay solicitudes que coincidan con
-            los filtros seleccionados.
+            No hay solicitudes que
+            coincidan con los filtros
+            seleccionados.
           </div>
         ) : (
           <RequestTable
@@ -312,7 +330,9 @@ export default function AdminDashboard() {
             actions={(request) => (
               <AdminRequestActions
                 request={request}
-                technicians={technicians}
+                technicians={
+                  technicians
+                }
                 onUpdated={reload}
               />
             )}
