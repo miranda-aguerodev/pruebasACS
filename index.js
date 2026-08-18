@@ -1,13 +1,112 @@
+require("dotenv").config();
+
 const express = require("express");
+const jwt = require("jsonwebtoken");
 const db = require("./db");
 
 const app = express();
 const PORT = 3000;
 
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error(
+    "JWT_SECRET no está configurado en el archivo .env"
+  );
+}
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check
+// =============================
+// AUTENTICACIÓN JWT
+// =============================
+
+function authenticateToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  const token =
+    authHeader &&
+    authHeader.startsWith("Bearer ")
+      ? authHeader.substring(7)
+      : null;
+
+  if (!token) {
+    return res.status(401).json({
+      error: "Autenticación requerida",
+    });
+  }
+
+  jwt.verify(
+    token,
+    JWT_SECRET,
+    {
+      algorithms: ["HS256"],
+    },
+    (error, decoded) => {
+      if (error) {
+        return res.status(403).json({
+          error: "Token inválido o expirado",
+        });
+      }
+
+      req.user = decoded;
+      next();
+    }
+  );
+}
+
+function getRequestForAuthorization(
+  solicitudId,
+  callback
+) {
+  const sql = `
+    SELECT
+      id,
+      solicitante_id,
+      tecnico_id,
+      estado
+    FROM solicitudes
+    WHERE id = ?
+    LIMIT 1
+  `;
+
+  db.query(sql, [solicitudId], (error, results) => {
+    if (error) {
+      return callback(error);
+    }
+
+    callback(null, results[0] || null);
+  });
+}
+
+function canAccessRequest(user, request) {
+  if (user.rol === "administrador") {
+    return true;
+  }
+
+  if (user.rol === "solicitante") {
+    return (
+      Number(request.solicitante_id) ===
+      Number(user.id)
+    );
+  }
+
+  if (user.rol === "tecnico") {
+    return (
+      Number(request.tecnico_id) ===
+      Number(user.id)
+    );
+  }
+
+  return false;
+}
+
+// =============================
+// HEALTH CHECK
+// PÚBLICO
+// =============================
+
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
@@ -16,7 +115,8 @@ app.get("/api/health", (req, res) => {
 });
 
 // =============================
-// AUTENTICACIÓN
+// LOGIN
+// PÚBLICO
 // =============================
 
 app.post("/api/login", (req, res) => {
@@ -35,30 +135,66 @@ app.post("/api/login", (req, res) => {
     LIMIT 1
   `;
 
-  db.query(sql, [email, password], (error, resultados) => {
-    if (error) {
-      console.error(error);
+  db.query(
+    sql,
+    [email, password],
+    (error, resultados) => {
+      if (error) {
+        console.error(error);
 
-      return res.status(500).json({
-        error: "Error interno del servidor",
+        return res.status(500).json({
+          error: "Error interno del servidor",
+        });
+      }
+
+      if (resultados.length === 0) {
+        return res.status(401).json({
+          error: "Correo o contraseña incorrectos",
+        });
+      }
+
+      const user = resultados[0];
+
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          rol: user.rol,
+        },
+        JWT_SECRET,
+        {
+          algorithm: "HS256",
+          expiresIn: "8h",
+        }
+      );
+
+      res.json({
+        ...user,
+        token,
       });
     }
-
-    if (resultados.length === 0) {
-      return res.status(401).json({
-        error: "Correo o contraseña incorrectos",
-      });
-    }
-
-    res.json(resultados[0]);
-  });
+  );
 });
 
 // =============================
+// PROTECCIÓN GLOBAL
+// =============================
+
+app.use("/api", authenticateToken);
+
+// =============================
 // TÉCNICOS
+// Solo Administrador
 // =============================
 
 app.get("/api/tecnicos", (req, res) => {
+  if (req.user.rol !== "administrador") {
+    return res.status(403).json({
+      error:
+        "No tiene permisos para consultar técnicos",
+    });
+  }
+
   const sql = `
     SELECT id, nombre, email
     FROM usuarios
@@ -83,6 +219,7 @@ app.get("/api/tecnicos", (req, res) => {
 // SOLICITUDES
 // =============================
 
+// Consultar solicitudes
 app.get("/api/solicitudes", (req, res) => {
   const {
     solicitante_id,
@@ -118,14 +255,34 @@ app.get("/api/solicitudes", (req, res) => {
 
   const values = [];
 
-  if (solicitante_id) {
-    sql += " AND s.solicitante_id = ?";
-    values.push(solicitante_id);
-  }
+  /*
+   * El backend decide qué solicitudes puede ver
+   * cada usuario.
+   *
+   * Nunca confiamos en un ID enviado desde React
+   * para decidir propiedad.
+   */
 
-  if (tecnico_id) {
+  if (req.user.rol === "solicitante") {
+    sql += " AND s.solicitante_id = ?";
+    values.push(req.user.id);
+  } else if (req.user.rol === "tecnico") {
     sql += " AND s.tecnico_id = ?";
-    values.push(tecnico_id);
+    values.push(req.user.id);
+  } else if (req.user.rol === "administrador") {
+    if (solicitante_id) {
+      sql += " AND s.solicitante_id = ?";
+      values.push(solicitante_id);
+    }
+
+    if (tecnico_id) {
+      sql += " AND s.tecnico_id = ?";
+      values.push(tecnico_id);
+    }
+  } else {
+    return res.status(403).json({
+      error: "Rol no autorizado",
+    });
   }
 
   if (estado) {
@@ -149,19 +306,25 @@ app.get("/api/solicitudes", (req, res) => {
 });
 
 // Crear solicitud
+// Solo Solicitante
 app.post("/api/solicitudes", (req, res) => {
+  if (req.user.rol !== "solicitante") {
+    return res.status(403).json({
+      error:
+        "Solo un solicitante puede registrar solicitudes",
+    });
+  }
+
   const {
     descripcion,
     ubicacion,
     categoria,
-    solicitante_id,
   } = req.body;
 
   if (
     !descripcion ||
     !ubicacion ||
-    !categoria ||
-    !solicitante_id
+    !categoria
   ) {
     return res.status(400).json({
       error: "Todos los campos son obligatorios",
@@ -182,6 +345,13 @@ app.post("/api/solicitudes", (req, res) => {
     });
   }
 
+  /*
+   * El solicitante se obtiene del JWT.
+   * Ya no confiamos en solicitante_id enviado
+   * por el frontend.
+   */
+  const solicitanteId = req.user.id;
+
   const sql = `
     INSERT INTO solicitudes
       (
@@ -199,7 +369,7 @@ app.post("/api/solicitudes", (req, res) => {
       descripcion,
       ubicacion,
       categoria,
-      solicitante_id,
+      solicitanteId,
     ],
     (error, result) => {
       if (error) {
@@ -230,7 +400,7 @@ app.post("/api/solicitudes", (req, res) => {
         historySql,
         [
           solicitudId,
-          solicitante_id,
+          solicitanteId,
           "creacion",
           "Solicitud creada",
         ],
@@ -261,7 +431,6 @@ app.put("/api/solicitudes/:id", (req, res) => {
     prioridad,
     estado,
     tecnico_id,
-    usuario_id,
     motivo_cierre,
     solicitud_relacionada_id,
   } = req.body;
@@ -271,7 +440,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
       id,
       prioridad,
       estado,
-      tecnico_id
+      tecnico_id,
+      solicitante_id
     FROM solicitudes
     WHERE id = ?
   `;
@@ -296,6 +466,71 @@ app.put("/api/solicitudes/:id", (req, res) => {
 
       const current = currentResults[0];
 
+      // =========================
+      // AUTORIZACIÓN POR ROL
+      // =========================
+
+      if (req.user.rol === "solicitante") {
+        return res.status(403).json({
+          error:
+            "El solicitante no puede modificar solicitudes",
+        });
+      }
+
+      if (req.user.rol === "tecnico") {
+        if (
+          Number(current.tecnico_id) !==
+          Number(req.user.id)
+        ) {
+          return res.status(403).json({
+            error:
+              "No tiene permiso para modificar esta solicitud",
+          });
+        }
+
+        if (
+          prioridad !== undefined ||
+          tecnico_id !== undefined ||
+          motivo_cierre !== undefined ||
+          solicitud_relacionada_id !== undefined
+        ) {
+          return res.status(403).json({
+            error:
+              "El técnico solo puede actualizar el estado de sus solicitudes",
+          });
+        }
+
+        const technicianTransitions = {
+          pendiente: ["en_proceso"],
+          en_proceso: ["finalizada"],
+          finalizada: [],
+          cerrada: [],
+        };
+
+        if (
+          estado === undefined ||
+          !technicianTransitions[
+            current.estado
+          ]?.includes(estado)
+        ) {
+          return res.status(403).json({
+            error:
+              "Transición no permitida para el técnico",
+          });
+        }
+      }
+
+      if (
+        ![
+          "administrador",
+          "tecnico",
+        ].includes(req.user.rol)
+      ) {
+        return res.status(403).json({
+          error: "Rol no autorizado",
+        });
+      }
+
       // Una solicitud cerrada queda bloqueada.
       if (current.estado === "cerrada") {
         return res.status(400).json({
@@ -314,67 +549,67 @@ app.put("/api/solicitudes/:id", (req, res) => {
           ? motivo_cierre.trim()
           : "";
 
-      /*
-       * Transiciones permitidas:
-       *
-       * pendiente  -> en_proceso
-       * pendiente  -> cerrada
-       *               solo cierre administrativo justificado
-       *
-       * en_proceso -> finalizada
-       *
-       * finalizada -> en_proceso
-       *               reapertura
-       *
-       * finalizada -> cerrada
-       */
-      const allowedTransitions = {
-        pendiente: ["en_proceso", "cerrada"],
-        en_proceso: ["finalizada"],
-        finalizada: ["en_proceso", "cerrada"],
-        cerrada: [],
-      };
+      // =========================
+      // REGLAS DEL ADMINISTRADOR
+      // =========================
 
-      if (
-        estado !== undefined &&
-        estado !== current.estado
-      ) {
-        const allowed =
-          allowedTransitions[current.estado] || [];
+      if (req.user.rol === "administrador") {
+        const allowedTransitions = {
+          pendiente: [
+            "en_proceso",
+            "cerrada",
+          ],
+          en_proceso: ["finalizada"],
+          finalizada: [
+            "en_proceso",
+            "cerrada",
+          ],
+          cerrada: [],
+        };
 
-        if (!allowed.includes(estado)) {
-          return res.status(400).json({
-            error:
-              `Transición de estado no permitida: ` +
-              `${current.estado} → ${estado}`,
-          });
-        }
-
-        // Pendiente -> Cerrada requiere justificación.
         if (
-          current.estado === "pendiente" &&
-          estado === "cerrada" &&
-          !normalizedCloseReason
+          estado !== undefined &&
+          estado !== current.estado
         ) {
-          return res.status(400).json({
-            error:
-              "Debe indicar el motivo para cerrar una solicitud pendiente",
-          });
-        }
+          const allowed =
+            allowedTransitions[
+              current.estado
+            ] || [];
 
-        // Para comenzar o finalizar trabajo se requiere técnico.
-        if (
-          ["en_proceso", "finalizada"].includes(estado) &&
-          (
-            effectiveTechnician === null ||
-            effectiveTechnician === "" ||
-            effectiveTechnician === undefined
-          )
-        ) {
-          return res.status(400).json({
-            error:
-              "Debe asignar un técnico antes de cambiar la solicitud a ese estado",
-          });
+          if (!allowed.includes(estado)) {
+            return res.status(400).json({
+              error:
+                `Transición de estado no permitida: ` +
+                `${current.estado} → ${estado}`,
+            });
+          }
+
+          if (
+            current.estado === "pendiente" &&
+            estado === "cerrada" &&
+            !normalizedCloseReason
+          ) {
+            return res.status(400).json({
+              error:
+                "Debe indicar el motivo para cerrar una solicitud pendiente",
+            });
+          }
+
+          if (
+            ["en_proceso", "finalizada"].includes(
+              estado
+            ) &&
+            (
+              effectiveTechnician === null ||
+              effectiveTechnician === "" ||
+              effectiveTechnician === undefined
+            )
+          ) {
+            return res.status(400).json({
+              error:
+                "Debe asignar un técnico antes de cambiar la solicitud a ese estado",
+            });
+          }
         }
       }
 
@@ -382,20 +617,32 @@ app.put("/api/solicitudes/:id", (req, res) => {
         const fields = [];
         const values = [];
 
-        if (prioridad !== undefined) {
+        // Solo Admin puede modificar prioridad.
+        if (
+          req.user.rol === "administrador" &&
+          prioridad !== undefined
+        ) {
           fields.push("prioridad = ?");
           values.push(prioridad);
         }
 
+        // Admin y Técnico pueden actualizar estado
+        // según las reglas validadas arriba.
         if (estado !== undefined) {
           fields.push("estado = ?");
           values.push(estado);
         }
 
-        if (tecnico_id !== undefined) {
+        // Solo Admin puede asignar técnico.
+        if (
+          req.user.rol === "administrador" &&
+          tecnico_id !== undefined
+        ) {
           fields.push("tecnico_id = ?");
           values.push(
-            tecnico_id === "" ? null : tecnico_id
+            tecnico_id === ""
+              ? null
+              : tecnico_id
           );
         }
 
@@ -428,13 +675,15 @@ app.put("/api/solicitudes/:id", (req, res) => {
 
             if (updateResult.affectedRows === 0) {
               return res.status(404).json({
-                error: "Solicitud no encontrada",
+                error:
+                  "Solicitud no encontrada",
               });
             }
 
             const events = [];
 
             if (
+              req.user.rol === "administrador" &&
               prioridad !== undefined &&
               prioridad !== current.prioridad
             ) {
@@ -444,6 +693,7 @@ app.put("/api/solicitudes/:id", (req, res) => {
             }
 
             if (
+              req.user.rol === "administrador" &&
               tecnico_id !== undefined &&
               Number(tecnico_id) !==
                 Number(current.tecnico_id)
@@ -452,11 +702,17 @@ app.put("/api/solicitudes/:id", (req, res) => {
                 tecnico_id === null ||
                 tecnico_id === ""
               ) {
-                events.push("Técnico desasignado");
+                events.push(
+                  "Técnico desasignado"
+                );
               } else if (!current.tecnico_id) {
-                events.push("Técnico asignado");
+                events.push(
+                  "Técnico asignado"
+                );
               } else {
-                events.push("Técnico reasignado");
+                events.push(
+                  "Técnico reasignado"
+                );
               }
             }
 
@@ -464,9 +720,11 @@ app.put("/api/solicitudes/:id", (req, res) => {
               estado !== undefined &&
               estado !== current.estado
             ) {
-              // Cierre administrativo desde Pendiente.
               if (
-                current.estado === "pendiente" &&
+                req.user.rol ===
+                  "administrador" &&
+                current.estado ===
+                  "pendiente" &&
                 estado === "cerrada"
               ) {
                 let description =
@@ -482,23 +740,21 @@ app.put("/api/solicitudes/:id", (req, res) => {
                 }
 
                 events.push(description);
-              }
-
-              // Cierre normal.
-              else if (estado === "cerrada") {
-                events.push("Solicitud cerrada");
-              }
-
-              // Reapertura.
-              else if (
-                current.estado === "finalizada" &&
+              } else if (
+                estado === "cerrada"
+              ) {
+                events.push(
+                  "Solicitud cerrada"
+                );
+              } else if (
+                current.estado ===
+                  "finalizada" &&
                 estado === "en_proceso"
               ) {
-                events.push("Solicitud reabierta");
-              }
-
-              // Cambio normal.
-              else {
+                events.push(
+                  "Solicitud reabierta"
+                );
+              } else {
                 events.push(
                   `Estado cambiado de ${current.estado} a ${estado}`
                 );
@@ -525,44 +781,51 @@ app.put("/api/solicitudes/:id", (req, res) => {
 
             let pending = events.length;
 
-            events.forEach((description) => {
-              db.query(
-                historySql,
-                [
-                  solicitudId,
-                  usuario_id || null,
-                  "cambio",
-                  description,
-                ],
-                (historyError) => {
-                  if (historyError) {
-                    console.error(
-                      "Error registrando historial:",
-                      historyError
-                    );
-                  }
+            events.forEach(
+              (description) => {
+                db.query(
+                  historySql,
+                  [
+                    solicitudId,
+                    req.user.id,
+                    "cambio",
+                    description,
+                  ],
+                  (historyError) => {
+                    if (historyError) {
+                      console.error(
+                        "Error registrando historial:",
+                        historyError
+                      );
+                    }
 
-                  pending -= 1;
+                    pending -= 1;
 
-                  if (pending === 0) {
-                    res.json({
-                      message:
-                        "Solicitud actualizada correctamente",
-                    });
+                    if (pending === 0) {
+                      res.json({
+                        message:
+                          "Solicitud actualizada correctamente",
+                      });
+                    }
                   }
-                }
-              );
-            });
+                );
+              }
+            );
           }
         );
       }
 
-      // Si se cierra como duplicada,
-      // la solicitud relacionada debe existir.
+      // =========================
+      // VALIDAR DUPLICADO
+      // Solo Administrador
+      // =========================
+
       if (
+        req.user.rol === "administrador" &&
         current.estado === "pendiente" &&
         estado === "cerrada" &&
-        normalizedCloseReason === "Solicitud duplicada"
+        normalizedCloseReason ===
+          "Solicitud duplicada"
       ) {
         if (!solicitud_relacionada_id) {
           return res.status(400).json({
@@ -571,10 +834,10 @@ app.put("/api/solicitudes/:id", (req, res) => {
           });
         }
 
-        // No puede relacionarse consigo misma.
         if (
-          Number(solicitud_relacionada_id) ===
-          Number(solicitudId)
+          Number(
+            solicitud_relacionada_id
+          ) === Number(solicitudId)
         ) {
           return res.status(400).json({
             error:
@@ -592,9 +855,14 @@ app.put("/api/solicitudes/:id", (req, res) => {
         return db.query(
           relatedSql,
           [solicitud_relacionada_id],
-          (relatedError, relatedResults) => {
+          (
+            relatedError,
+            relatedResults
+          ) => {
             if (relatedError) {
-              console.error(relatedError);
+              console.error(
+                relatedError
+              );
 
               return res.status(500).json({
                 error:
@@ -602,7 +870,9 @@ app.put("/api/solicitudes/:id", (req, res) => {
               });
             }
 
-            if (relatedResults.length === 0) {
+            if (
+              relatedResults.length === 0
+            ) {
               return res.status(400).json({
                 error:
                   "La solicitud relacionada no existe",
@@ -623,86 +893,175 @@ app.put("/api/solicitudes/:id", (req, res) => {
 // COMENTARIOS
 // =============================
 
+// Consultar comentarios
 app.get(
   "/api/solicitudes/:id/comentarios",
   (req, res) => {
-    const { id } = req.params;
+    const solicitudId = req.params.id;
 
-    const sql = `
-      SELECT
-        c.id,
-        c.comentario,
-        c.fecha,
-        c.usuario_id,
-        u.nombre,
-        u.rol
-      FROM comentarios c
-      INNER JOIN usuarios u
-        ON c.usuario_id = u.id
-      WHERE c.solicitud_id = ?
-      ORDER BY c.fecha ASC
-    `;
-
-    db.query(sql, [id], (error, resultados) => {
-      if (error) {
-        console.error(error);
-
-        return res.status(500).json({
-          error: "Error al consultar comentarios",
-        });
-      }
-
-      res.json(resultados);
-    });
-  }
-);
-
-app.post(
-  "/api/solicitudes/:id/comentarios",
-  (req, res) => {
-    const { id } = req.params;
-
-    const {
-      usuario_id,
-      comentario,
-    } = req.body;
-
-    if (!usuario_id || !comentario?.trim()) {
-      return res.status(400).json({
-        error: "Usuario y comentario son obligatorios",
-      });
-    }
-
-    const sql = `
-      INSERT INTO comentarios
-        (
-          solicitud_id,
-          usuario_id,
-          comentario
-        )
-      VALUES (?, ?, ?)
-    `;
-
-    db.query(
-      sql,
-      [
-        id,
-        usuario_id,
-        comentario.trim(),
-      ],
-      (error, resultado) => {
-        if (error) {
-          console.error(error);
+    getRequestForAuthorization(
+      solicitudId,
+      (accessError, request) => {
+        if (accessError) {
+          console.error(accessError);
 
           return res.status(500).json({
-            error: "Error al registrar comentario",
+            error:
+              "Error al validar la solicitud",
           });
         }
 
-        res.status(201).json({
-          message: "Comentario registrado",
-          id: resultado.insertId,
-        });
+        if (!request) {
+          return res.status(404).json({
+            error:
+              "Solicitud no encontrada",
+          });
+        }
+
+        if (
+          !canAccessRequest(
+            req.user,
+            request
+          )
+        ) {
+          return res.status(403).json({
+            error:
+              "No tiene permiso para consultar esta solicitud",
+          });
+        }
+
+        const sql = `
+          SELECT
+            c.id,
+            c.comentario,
+            c.fecha,
+            c.usuario_id,
+            u.nombre,
+            u.rol
+          FROM comentarios c
+          INNER JOIN usuarios u
+            ON c.usuario_id = u.id
+          WHERE c.solicitud_id = ?
+          ORDER BY c.fecha ASC
+        `;
+
+        db.query(
+          sql,
+          [solicitudId],
+          (error, resultados) => {
+            if (error) {
+              console.error(error);
+
+              return res.status(500).json({
+                error:
+                  "Error al consultar comentarios",
+              });
+            }
+
+            res.json(resultados);
+          }
+        );
+      }
+    );
+  }
+);
+
+// Agregar comentario
+// Solo Técnico asignado
+app.post(
+  "/api/solicitudes/:id/comentarios",
+  (req, res) => {
+    const solicitudId = req.params.id;
+    const { comentario } = req.body;
+
+    if (req.user.rol !== "tecnico") {
+      return res.status(403).json({
+        error:
+          "Solo el técnico asignado puede registrar comentarios",
+      });
+    }
+
+    if (!comentario?.trim()) {
+      return res.status(400).json({
+        error:
+          "El comentario es obligatorio",
+      });
+    }
+
+    getRequestForAuthorization(
+      solicitudId,
+      (accessError, request) => {
+        if (accessError) {
+          console.error(accessError);
+
+          return res.status(500).json({
+            error:
+              "Error al validar la solicitud",
+          });
+        }
+
+        if (!request) {
+          return res.status(404).json({
+            error:
+              "Solicitud no encontrada",
+          });
+        }
+
+        if (
+          Number(request.tecnico_id) !==
+          Number(req.user.id)
+        ) {
+          return res.status(403).json({
+            error:
+              "No tiene permiso para comentar esta solicitud",
+          });
+        }
+
+        if (
+          ["finalizada", "cerrada"].includes(
+            request.estado
+          )
+        ) {
+          return res.status(400).json({
+            error:
+              "No se pueden agregar comentarios a una solicitud finalizada o cerrada",
+          });
+        }
+
+        const sql = `
+          INSERT INTO comentarios
+            (
+              solicitud_id,
+              usuario_id,
+              comentario
+            )
+          VALUES (?, ?, ?)
+        `;
+
+        db.query(
+          sql,
+          [
+            solicitudId,
+            req.user.id,
+            comentario.trim(),
+          ],
+          (error, resultado) => {
+            if (error) {
+              console.error(error);
+
+              return res.status(500).json({
+                error:
+                  "Error al registrar comentario",
+              });
+            }
+
+            res.status(201).json({
+              message:
+                "Comentario registrado",
+              id: resultado.insertId,
+            });
+          }
+        );
       }
     );
   }
@@ -717,51 +1076,88 @@ app.get(
   (req, res) => {
     const solicitudId = req.params.id;
 
-    const sql = `
-      SELECT
-        h.id,
-        h.descripcion AS contenido,
-        h.tipo,
-        h.fecha,
-        u.nombre,
-        u.rol,
-        'evento' AS origen
-      FROM historial_solicitudes h
-      LEFT JOIN usuarios u
-        ON h.usuario_id = u.id
-      WHERE h.solicitud_id = ?
-
-      UNION ALL
-
-      SELECT
-        c.id,
-        c.comentario AS contenido,
-        'comentario' AS tipo,
-        c.fecha,
-        u.nombre,
-        u.rol,
-        'comentario' AS origen
-      FROM comentarios c
-      INNER JOIN usuarios u
-        ON c.usuario_id = u.id
-      WHERE c.solicitud_id = ?
-
-      ORDER BY fecha ASC
-    `;
-
-    db.query(
-      sql,
-      [solicitudId, solicitudId],
-      (error, results) => {
-        if (error) {
-          console.error(error);
+    getRequestForAuthorization(
+      solicitudId,
+      (accessError, request) => {
+        if (accessError) {
+          console.error(accessError);
 
           return res.status(500).json({
-            error: "Error al obtener el historial",
+            error:
+              "Error al validar la solicitud",
           });
         }
 
-        res.json(results);
+        if (!request) {
+          return res.status(404).json({
+            error:
+              "Solicitud no encontrada",
+          });
+        }
+
+        if (
+          !canAccessRequest(
+            req.user,
+            request
+          )
+        ) {
+          return res.status(403).json({
+            error:
+              "No tiene permiso para consultar esta solicitud",
+          });
+        }
+
+        const sql = `
+          SELECT
+            h.id,
+            h.descripcion AS contenido,
+            h.tipo,
+            h.fecha,
+            u.nombre,
+            u.rol,
+            'evento' AS origen
+          FROM historial_solicitudes h
+          LEFT JOIN usuarios u
+            ON h.usuario_id = u.id
+          WHERE h.solicitud_id = ?
+
+          UNION ALL
+
+          SELECT
+            c.id,
+            c.comentario AS contenido,
+            'comentario' AS tipo,
+            c.fecha,
+            u.nombre,
+            u.rol,
+            'comentario' AS origen
+          FROM comentarios c
+          INNER JOIN usuarios u
+            ON c.usuario_id = u.id
+          WHERE c.solicitud_id = ?
+
+          ORDER BY fecha ASC
+        `;
+
+        db.query(
+          sql,
+          [
+            solicitudId,
+            solicitudId,
+          ],
+          (error, results) => {
+            if (error) {
+              console.error(error);
+
+              return res.status(500).json({
+                error:
+                  "Error al obtener el historial",
+              });
+            }
+
+            res.json(results);
+          }
+        );
       }
     );
   }
