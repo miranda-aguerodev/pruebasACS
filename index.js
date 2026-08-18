@@ -255,14 +255,6 @@ app.get("/api/solicitudes", (req, res) => {
 
   const values = [];
 
-  /*
-   * El backend decide qué solicitudes puede ver
-   * cada usuario.
-   *
-   * Nunca confiamos en un ID enviado desde React
-   * para decidir propiedad.
-   */
-
   if (req.user.rol === "solicitante") {
     sql += " AND s.solicitante_id = ?";
     values.push(req.user.id);
@@ -345,11 +337,6 @@ app.post("/api/solicitudes", (req, res) => {
     });
   }
 
-  /*
-   * El solicitante se obtiene del JWT.
-   * Ya no confiamos en solicitante_id enviado
-   * por el frontend.
-   */
   const solicitanteId = req.user.id;
 
   const sql = `
@@ -433,6 +420,7 @@ app.put("/api/solicitudes/:id", (req, res) => {
     tecnico_id,
     motivo_cierre,
     solicitud_relacionada_id,
+    observacion_final,
   } = req.body;
 
   const currentSql = `
@@ -492,7 +480,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
           prioridad !== undefined ||
           tecnico_id !== undefined ||
           motivo_cierre !== undefined ||
-          solicitud_relacionada_id !== undefined
+          solicitud_relacionada_id !== undefined ||
+          observacion_final !== undefined
         ) {
           return res.status(403).json({
             error:
@@ -531,7 +520,6 @@ app.put("/api/solicitudes/:id", (req, res) => {
         });
       }
 
-      // Una solicitud cerrada queda bloqueada.
       if (current.estado === "cerrada") {
         return res.status(400).json({
           error:
@@ -547,6 +535,11 @@ app.put("/api/solicitudes/:id", (req, res) => {
       const normalizedCloseReason =
         typeof motivo_cierre === "string"
           ? motivo_cierre.trim()
+          : "";
+
+      const normalizedFinalObservation =
+        typeof observacion_final === "string"
+          ? observacion_final.trim()
           : "";
 
       // =========================
@@ -595,6 +588,20 @@ app.put("/api/solicitudes/:id", (req, res) => {
             });
           }
 
+          // HU-10:
+          // El cierre normal de una solicitud finalizada
+          // requiere una observación final.
+          if (
+            current.estado === "finalizada" &&
+            estado === "cerrada" &&
+            !normalizedFinalObservation
+          ) {
+            return res.status(400).json({
+              error:
+                "Debe indicar una observación final antes de cerrar la solicitud",
+            });
+          }
+
           if (
             ["en_proceso", "finalizada"].includes(
               estado
@@ -617,7 +624,6 @@ app.put("/api/solicitudes/:id", (req, res) => {
         const fields = [];
         const values = [];
 
-        // Solo Admin puede modificar prioridad.
         if (
           req.user.rol === "administrador" &&
           prioridad !== undefined
@@ -626,14 +632,11 @@ app.put("/api/solicitudes/:id", (req, res) => {
           values.push(prioridad);
         }
 
-        // Admin y Técnico pueden actualizar estado
-        // según las reglas validadas arriba.
         if (estado !== undefined) {
           fields.push("estado = ?");
           values.push(estado);
         }
 
-        // Solo Admin puede asignar técnico.
         if (
           req.user.rol === "administrador" &&
           tecnico_id !== undefined
@@ -741,10 +744,14 @@ app.put("/api/solicitudes/:id", (req, res) => {
 
                 events.push(description);
               } else if (
+                req.user.rol ===
+                  "administrador" &&
+                current.estado ===
+                  "finalizada" &&
                 estado === "cerrada"
               ) {
                 events.push(
-                  "Solicitud cerrada"
+                  `Solicitud cerrada. Observación final: ${normalizedFinalObservation}`
                 );
               } else if (
                 current.estado ===

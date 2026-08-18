@@ -26,7 +26,6 @@ export default function AdminRequestActions({
   });
 
   const [saving, setSaving] = useState(false);
-
   const [feedback, setFeedback] = useState(null);
 
   const [
@@ -38,6 +37,11 @@ export default function AdminRequestActions({
   const [otherReason, setOtherReason] = useState("");
   const [relatedRequestId, setRelatedRequestId] =
     useState("");
+
+  const [
+    finalObservation,
+    setFinalObservation,
+  ] = useState("");
 
   useEffect(() => {
     setForm({
@@ -51,6 +55,10 @@ export default function AdminRequestActions({
     request.estado,
     request.tecnico_id,
   ]);
+
+  useEffect(() => {
+    setFinalObservation("");
+  }, [request.id, request.estado]);
 
   function showFeedback(message, type = "success") {
     setFeedback({
@@ -125,13 +133,29 @@ export default function AdminRequestActions({
   }
 
   async function handleClose() {
+    const normalizedObservation =
+      finalObservation.trim();
+
+    if (!normalizedObservation) {
+      showFeedback(
+        "Debe ingresar una observación final antes de cerrar la solicitud.",
+        "error"
+      );
+
+      return;
+    }
+
     try {
       setSaving(true);
 
       await updateRequest(request.id, {
         estado: "cerrada",
+        observacion_final:
+          normalizedObservation,
         usuario_id: user.id,
       });
+
+      setFinalObservation("");
 
       showFeedback(
         "Solicitud cerrada correctamente."
@@ -256,6 +280,9 @@ export default function AdminRequestActions({
     form.estado !== request.estado ||
     String(form.tecnico_id) !== originalTechnicianId;
 
+  const hasFinalObservation =
+    finalObservation.trim().length > 0;
+
   if (request.estado === "cerrada") {
     return (
       <div className="request-actions">
@@ -287,10 +314,37 @@ export default function AdminRequestActions({
   if (request.estado === "finalizada") {
     return (
       <div className="request-actions">
+        <label
+          className="request-action-field"
+          htmlFor={`final-observation-${request.id}`}
+        >
+          <span>Observación final *</span>
+
+          <textarea
+            id={`final-observation-${request.id}`}
+            value={finalObservation}
+            onChange={(event) =>
+              setFinalObservation(
+                event.target.value
+              )
+            }
+            placeholder="Describa el resultado final del mantenimiento..."
+            rows="3"
+            disabled={saving}
+          />
+        </label>
+
         <button
           className="button button-success button-small"
-          disabled={saving}
+          disabled={
+            saving || !hasFinalObservation
+          }
           onClick={handleClose}
+          title={
+            hasFinalObservation
+              ? "Cerrar la solicitud"
+              : "Ingrese una observación final para habilitar el cierre"
+          }
         >
           {saving
             ? "Procesando..."
