@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Documentar los defectos identificados durante el desarrollo, las pruebas funcionales, automatizadas, exploratorias, de seguridad y de regresión del Sistema de Gestión de Solicitudes de Mantenimiento NovaTech.
+Documentar los defectos identificados durante el desarrollo, las pruebas funcionales, automatizadas, exploratorias, de seguridad, usabilidad y regresión del Sistema de Gestión de Solicitudes de Mantenimiento NovaTech.
 
 ---
 
@@ -22,6 +22,8 @@ Documentar los defectos identificados durante el desarrollo, las pruebas funcion
 | DEF-10 | NovaTech permitía transiciones de estado sin validar el contexto del flujo de negocio. Durante una prueba exploratoria fue posible cambiar una solicitud directamente de Pendiente a Finalizada sin técnico asignado y sin pasar por En Proceso. | Media | Cerrado | Se implementaron reglas de transición en backend y frontend. Pendiente → En Proceso requiere técnico; En Proceso → Finalizada requiere técnico; Finalizada → En Proceso permite reapertura; Finalizada → Cerrada permite cierre normal. También se agregó Pendiente → Cerrada como excepción administrativa justificada. Para solicitudes duplicadas se exige una solicitud relacionada existente y diferente de la solicitud actual. |
 | DEF-11 | Los textos extensos, especialmente ubicaciones cercanas al máximo permitido, podían desbordar horizontalmente el modal de historial. | Baja | Cerrado | Se agregaron reglas CSS de `overflow-wrap`, `word-break`, límites de ancho y control de overflow horizontal al modal, encabezado, resumen y entradas del historial. |
 | DEF-12 | Los endpoints del backend podían consultarse y modificarse directamente sin autenticación ni autorización efectiva por rol. Las restricciones existentes en React protegían la interfaz, pero podían omitirse mediante peticiones directas a la API. | Alta | Cerrado | Se implementó autenticación mediante JWT, envío automático del token desde el frontend y autorización por rol y propiedad en el backend. El servidor obtiene la identidad y rol desde el JWT y aplica restricciones específicas para Administrador, Técnico y Solicitante. |
+| DEF-13 | Los controles de Prioridad, Estado y Técnico del Administrador aparecían como selectores consecutivos sin etiquetas visibles, obligando al usuario a inferir la función de cada control. | Baja | Cerrado | Se agregaron etiquetas visibles para Prioridad, Estado y Técnico. El botón `Guardar` se cambió a `Guardar cambios` y permanece deshabilitado mientras no existan modificaciones. También se mejoró el etiquetado del cierre administrativo. |
+| DEF-14 | El Técnico podía finalizar una solicitud con un solo clic, sin confirmación previa, provocando riesgo de finalizar accidentalmente un trabajo todavía activo. | Media | Cerrado | Se agregó un paso de confirmación antes de finalizar. El usuario puede cancelar y continuar trabajando o confirmar explícitamente la finalización. |
 
 ---
 
@@ -67,43 +69,33 @@ Técnico: Sin asignar
 
 ## Ajuste de la regla de negocio
 
-Durante el análisis del defecto se identificó una excepción válida: varias personas pueden reportar el mismo problema.
-
-Por este motivo se definió el siguiente comportamiento:
+Se definió el siguiente comportamiento:
 
 ```text
-Pendiente → En Proceso        Requiere técnico
-Pendiente → Finalizada        No permitido
-Pendiente → Cerrada           Cierre administrativo justificado
+Pendiente → En Proceso       Requiere técnico
+Pendiente → Finalizada       No permitido
+Pendiente → Cerrada          Cierre administrativo justificado
 
-En Proceso → Finalizada       Requiere técnico
+En Proceso → Finalizada      Requiere técnico
 
-Finalizada → En Proceso       Reapertura
-Finalizada → Cerrada          Cierre normal
+Finalizada → En Proceso      Reapertura
+Finalizada → Cerrada         Cierre normal
 
-Cerrada → Otro estado         No permitido
+Cerrada → Otro estado        No permitido
 ```
 
 ## Cierre administrativo
 
 Una solicitud Pendiente puede cerrarse sin técnico únicamente mediante una excepción administrativa.
 
-Los motivos disponibles en la interfaz incluyen:
+Los motivos disponibles incluyen:
 
 - Solicitud duplicada.
 - Reporte inválido.
 - Ya resuelto.
 - Otro.
 
-Cuando se selecciona:
-
-```text
-Solicitud duplicada
-```
-
-NovaTech exige indicar una solicitud relacionada.
-
-El backend valida que:
+Para una solicitud duplicada, el backend valida que:
 
 1. Se haya indicado una solicitud relacionada.
 2. La solicitud relacionada exista.
@@ -204,11 +196,9 @@ Se realizó una petición directa al endpoint:
 GET /api/solicitudes
 ```
 
-sin iniciar sesión y sin enviar ningún token de autenticación.
+sin iniciar sesión y sin enviar ningún token.
 
 ### Resultado esperado
-
-El backend debía rechazar la petición con una respuesta de autenticación:
 
 ```text
 401 Unauthorized
@@ -220,21 +210,19 @@ El backend debía rechazar la petición con una respuesta de autenticación:
 
 La API respondió con la lista de solicitudes almacenadas.
 
-Esto permitió comprobar que las restricciones existentes en React protegían la navegación de la interfaz, pero no impedían acceder directamente a los endpoints del servidor.
+Esto confirmó que las restricciones existentes en React protegían la interfaz, pero no los endpoints del servidor.
 
 ---
 
 ## Hallazgo 2 — Falta de autorización por rol
 
-Después de incorporar autenticación mediante JWT se realizó una segunda prueba.
-
-Se inició sesión con:
+Después de incorporar autenticación mediante JWT se inició sesión como:
 
 ```text
 Rol: Solicitante
 ```
 
-y se utilizó el token obtenido para intentar modificar directamente la prioridad de una solicitud mediante:
+y se intentó modificar directamente la prioridad mediante:
 
 ```text
 PUT /api/solicitudes/1
@@ -242,7 +230,7 @@ PUT /api/solicitudes/1
 
 ### Resultado esperado
 
-La modificación debía ser rechazada, debido a que cambiar la prioridad corresponde al rol Administrador.
+La operación debía ser rechazada porque modificar prioridades corresponde al Administrador.
 
 ### Resultado obtenido inicialmente
 
@@ -254,9 +242,7 @@ La API respondió:
 Solicitud actualizada correctamente
 ```
 
-La prueba confirmó que la primera implementación verificaba que existiera un usuario autenticado, pero todavía no comprobaba si su rol estaba autorizado para ejecutar la operación.
-
-La prioridad modificada durante la prueba fue posteriormente restaurada por un usuario Administrador.
+Esto confirmó que existía autenticación, pero todavía no autorización efectiva por rol.
 
 ---
 
@@ -264,17 +250,17 @@ La prioridad modificada durante la prueba fue posteriormente restaurada por un u
 
 El defecto permitía omitir las restricciones de la interfaz mediante peticiones directas al backend.
 
-Entre los riesgos identificados estaban:
+Entre los riesgos estaban:
 
 - Consultar solicitudes sin autenticación.
 - Consultar recursos que no correspondieran al usuario.
 - Modificar prioridades desde un rol no autorizado.
-- Intentar modificar solicitudes no asignadas a un técnico.
-- Consultar historiales de solicitudes ajenas.
-- Utilizar identificadores enviados por el cliente para intentar ejecutar operaciones sobre otro usuario.
-- Ejecutar acciones administrativas mediante peticiones directas.
+- Modificar solicitudes no asignadas a un técnico.
+- Consultar historiales ajenos.
+- Suplantar identificadores enviados desde el cliente.
+- Ejecutar operaciones administrativas directamente sobre la API.
 
-Debido al impacto potencial sobre la confidencialidad e integridad de la información, el defecto fue clasificado con severidad:
+Se clasificó como:
 
 **Alta**
 
@@ -292,9 +278,7 @@ El endpoint:
 POST /api/login
 ```
 
-valida las credenciales y genera un token firmado que identifica al usuario.
-
-El token contiene:
+genera un token que contiene:
 
 ```text
 id
@@ -302,13 +286,13 @@ email
 rol
 ```
 
-y tiene una duración configurada de:
+con una duración configurada de:
 
 ```text
 8 horas
 ```
 
-El secreto utilizado para firmar los tokens se almacena mediante:
+El secreto utilizado se almacena mediante:
 
 ```text
 JWT_SECRET
@@ -320,21 +304,19 @@ dentro del archivo:
 .env
 ```
 
-El archivo `.env` permanece excluido del repositorio para evitar publicar información sensible.
+El archivo `.env` permanece excluido del repositorio.
 
 ---
 
 ## Protección de endpoints
 
-Los endpoints protegidos requieren el encabezado:
+Los endpoints protegidos requieren:
 
 ```text
 Authorization: Bearer <token>
 ```
 
-Antes de procesar cada petición, el backend valida que el token sea válido.
-
-Los endpoints que permanecen públicos son:
+Los endpoints públicos son:
 
 ```text
 GET /api/health
@@ -345,311 +327,374 @@ El resto de las operaciones bajo `/api` requieren autenticación.
 
 ---
 
-## Integración con frontend
+## Autorización por rol
 
-Se modificó:
+El backend utiliza la identidad y rol contenidos en el JWT.
 
-```text
-client/src/services/api.js
-```
-
-para recuperar automáticamente el token almacenado después del inicio de sesión.
-
-Las peticiones autenticadas incluyen:
-
-```text
-Authorization: Bearer <token>
-```
-
-Esto permite que la interfaz continúe funcionando normalmente mientras el backend valida la identidad del usuario en cada operación.
-
----
-
-# Autorización por rol
-
-Además de verificar la autenticación, el servidor utiliza el rol y el identificador contenidos dentro del JWT para determinar qué acciones puede realizar cada usuario.
-
-El backend deja de confiar en valores enviados por el cliente como:
+Ya no confía en valores proporcionados por el cliente como:
 
 ```text
 usuario_id
 solicitante_id
 ```
 
-para establecer la identidad real del usuario.
+para determinar la identidad real.
 
----
+### Solicitante
 
-## Solicitante
-
-### Puede
+Puede:
 
 - Crear solicitudes.
-- Consultar sus propias solicitudes.
-- Consultar el historial de solicitudes propias.
+- Consultar sus solicitudes.
+- Consultar su historial.
 
-### No puede
+No puede:
 
 - Cambiar prioridades.
 - Asignar técnicos.
 - Modificar estados administrativos.
-- Modificar solicitudes directamente mediante la API.
-- Ejecutar acciones correspondientes a Administradores o Técnicos.
+- Ejecutar operaciones de otros roles.
 
----
+### Técnico
 
-## Técnico
+Puede:
 
-### Puede
+- Consultar solicitudes asignadas.
+- Consultar sus historiales.
+- Iniciar solicitudes.
+- Finalizar solicitudes.
+- Registrar comentarios.
 
-- Consultar solicitudes que tiene asignadas.
-- Consultar el historial de solicitudes asignadas.
-- Cambiar una solicitud asignada de Pendiente a En Proceso.
-- Cambiar una solicitud asignada de En Proceso a Finalizada.
-- Registrar comentarios en solicitudes asignadas y activas.
+No puede:
 
-### No puede
-
-- Modificar solicitudes que no tiene asignadas.
-- Consultar historiales de solicitudes ajenas.
+- Modificar solicitudes no asignadas.
+- Consultar historiales ajenos.
 - Cambiar prioridades.
 - Asignar técnicos.
 - Ejecutar cierres administrativos.
 
----
-
-## Administrador
+### Administrador
 
 Puede:
 
 - Consultar todas las solicitudes.
-- Consultar la lista de técnicos.
+- Consultar técnicos.
 - Modificar prioridades.
 - Asignar o reasignar técnicos.
-- Ejecutar las transiciones administrativas permitidas.
-- Cerrar solicitudes.
-- Reabrir solicitudes.
-- Ejecutar cierres administrativos justificados.
-- Consultar los historiales del sistema.
+- Gestionar estados.
+- Cerrar y reabrir solicitudes.
+- Ejecutar cierres administrativos.
+- Consultar historiales.
 
 ---
 
 # Regresión de DEF-12
-
-Después de implementar autenticación y autorización se repitieron los escenarios principales relacionados con el defecto.
 
 | ID | Prueba | Resultado esperado | Resultado |
 |---|---|---|---|
 | AUTH-01 | Consultar solicitudes sin token | Rechazado con 401 | PASS |
 | AUTH-02 | Solicitante intenta modificar prioridad | Rechazado con 403 | PASS |
 | AUTH-03 | Técnico intenta modificar una solicitud no asignada | Rechazado con 403 | PASS |
-| AUTH-04 | Técnico intenta consultar historial de una solicitud no asignada | Rechazado con 403 | PASS |
-| AUTH-05 | Técnico consulta historial de una solicitud asignada | Permitido | PASS |
-| AUTH-06 | Técnico agrega comentario a una solicitud asignada | Permitido | PASS |
-| AUTH-07 | Solicitante crea una nueva solicitud autenticado | Permitido | PASS |
-| AUTH-08 | Solicitante intenta utilizar otro `solicitante_id` como filtro | Backend conserva la identidad determinada por el JWT | PASS |
+| AUTH-04 | Técnico intenta consultar historial no asignado | Rechazado con 403 | PASS |
+| AUTH-05 | Técnico consulta historial de solicitud asignada | Permitido | PASS |
+| AUTH-06 | Técnico agrega comentario a solicitud asignada | Permitido | PASS |
+| AUTH-07 | Solicitante crea una solicitud autenticado | Permitido | PASS |
+| AUTH-08 | Solicitante envía otro `solicitante_id` como filtro | Se utiliza identidad del JWT | PASS |
 
----
+## Evidencia destacada
 
-## AUTH-01 — Acceso sin autenticación
-
-Se intentó consultar:
-
-```text
-GET /api/solicitudes
-```
-
-sin enviar token.
-
-Respuesta:
+Sin token:
 
 ```text
 Autenticación requerida
 ```
 
-Resultado:
-
-**PASS**
-
----
-
-## AUTH-02 — Modificación no autorizada por Solicitante
-
-El Solicitante autenticado intentó cambiar directamente la prioridad de una solicitud.
-
-Respuesta:
+Solicitante intentando modificar prioridad:
 
 ```text
 El solicitante no puede modificar solicitudes
 ```
 
-El servidor devolvió un error de autorización y no permitió la operación.
-
-Resultado:
-
-**PASS**
-
----
-
-## AUTH-03 — Técnico intenta modificar solicitud no asignada
-
-El Técnico autenticado intentó modificar una solicitud que no estaba asignada a su usuario.
-
-Respuesta:
+Técnico intentando modificar solicitud no asignada:
 
 ```text
 No tiene permiso para modificar esta solicitud
 ```
 
-Resultado:
-
-**PASS**
-
----
-
-## AUTH-04 — Técnico intenta consultar historial ajeno
-
-El Técnico intentó consultar el historial de una solicitud que no estaba asignada a su usuario.
-
-Respuesta:
+Técnico intentando consultar historial ajeno:
 
 ```text
 No tiene permiso para consultar esta solicitud
 ```
 
-Resultado:
+También se validaron correctamente los flujos autorizados.
 
-**PASS**
-
----
-
-## AUTH-05 — Consulta autorizada de historial
-
-Posteriormente se utilizó una solicitud que sí estaba asignada al Técnico.
-
-El sistema devolvió correctamente el historial de la solicitud.
-
-Resultado:
-
-**PASS**
-
-Esto confirmó que la corrección no bloqueó las operaciones legítimas del Técnico.
-
----
-
-## AUTH-06 — Comentario autorizado
-
-Desde la interfaz web, el Técnico registró el comentario:
+El Técnico registró:
 
 ```text
 Prueba de autorización JWT
 ```
 
-El comentario apareció correctamente en el historial identificado como:
+y el Solicitante creó:
 
 ```text
-Tecnico NovaTech
+Prueba autorización solicitante
 ```
 
-Resultado:
-
-**PASS**
-
----
-
-## AUTH-07 — Creación de solicitud autenticada
-
-El Solicitante inició sesión y creó la solicitud:
-
-```text
-Descripción: Prueba autorización solicitante
-Ubicación: Aula 100
-Categoría: Tecnología
-```
-
-La solicitud fue registrada correctamente como:
-
-```text
-ID: #9
-Prioridad: Media
-Estado: Pendiente
-Solicitante: Solicitante NovaTech
-Técnico: Sin asignar
-```
-
-Resultado:
-
-**PASS**
-
----
-
-## AUTH-08 — Identidad obtenida desde JWT
-
-Se realizó una petición autenticada como el Solicitante con identificador:
-
-```text
-solicitante_id = 3
-```
-
-pero se envió intencionalmente el filtro:
-
-```text
-?solicitante_id=1
-```
-
-El backend ignoró el identificador enviado por el cliente y devolvió solicitudes asociadas a:
-
-```text
-solicitante_id = 3
-```
-
-Esto confirmó que el servidor utiliza la identidad contenida en el JWT en lugar de confiar en el identificador suministrado desde el frontend.
-
-Resultado:
-
-**PASS**
-
-> Nota: debido a que los datos actuales de prueba pertenecen principalmente al mismo Solicitante, esta comprobación valida que el parámetro enviado por el cliente sea ignorado, aunque no representa una prueba completa de aislamiento entre dos cuentas Solicitante distintas.
-
----
-
-# Estado final de DEF-12
-
-## Resultado inicial
-
-**FAIL**
-
-La API podía utilizarse sin autenticación y posteriormente se comprobó que un usuario autenticado podía intentar ejecutar operaciones correspondientes a otro rol.
-
-## Resultado posterior
-
-**PASS**
-
-El backend ahora aplica:
-
-```text
-Autenticación
-+
-Autorización por rol
-+
-Control de acceso por solicitud
-+
-Identidad obtenida desde JWT
-```
-
-antes de ejecutar operaciones protegidas.
-
-## Estado
+## Estado final
 
 **CERRADO**
 
 ---
 
-# Regresión técnica posterior a las correcciones
+# Detalle de DEF-13
 
-Después de las correcciones más recientes, incluida la implementación de autenticación y autorización, se ejecutó nuevamente la regresión técnica del frontend.
+## Origen
+
+El defecto fue identificado durante la evaluación heurística de usabilidad.
+
+Se revisó la interfaz utilizada por el Administrador para gestionar solicitudes.
+
+## Comportamiento observado
+
+En la columna:
+
+```text
+Acciones
+```
+
+aparecían tres selectores consecutivos, por ejemplo:
+
+```text
+Media
+Pendiente
+Sin asignar
+```
+
+sin etiquetas visibles.
+
+Aunque el orden podía inferirse observando las columnas de la tabla, un usuario nuevo debía recordar o deducir que los controles correspondían a:
+
+```text
+Prioridad
+Estado
+Técnico
+```
+
+## Riesgo identificado
+
+El diseño aumentaba innecesariamente la carga cognitiva y podía provocar que el Administrador modificara un campo diferente al esperado.
+
+## Severidad
+
+**Baja**
+
+## Corrección
+
+Se agregaron etiquetas visibles:
+
+```text
+PRIORIDAD
+ESTADO
+TÉCNICO
+```
+
+También se reemplazó:
+
+```text
+Guardar
+```
+
+por:
+
+```text
+Guardar cambios
+```
+
+El botón permanece deshabilitado cuando los valores coinciden con los datos actualmente almacenados.
+
+Cuando se modifica prioridad, estado o técnico, el botón se activa.
+
+Además, dentro del cierre administrativo se incorporaron etiquetas para:
+
+```text
+Motivo de cierre
+Detalle del motivo
+Solicitud relacionada
+```
+
+## Regresión
+
+Se verificó que:
+
+| Prueba | Resultado |
+|---|---|
+| Las etiquetas Prioridad, Estado y Técnico son visibles | PASS |
+| Los controles mantienen sus valores originales | PASS |
+| `Guardar cambios` permanece deshabilitado sin modificaciones | PASS |
+| Al modificar un campo el botón se habilita | PASS |
+| El cierre administrativo mantiene su funcionamiento | PASS |
+
+## Estado final
+
+**CERRADO**
 
 ---
+
+# Detalle de DEF-14
+
+## Origen
+
+El defecto fue identificado durante la evaluación heurística del panel Técnico.
+
+Se utilizó una solicitud en estado:
+
+```text
+En Proceso
+```
+
+## Comportamiento observado
+
+Al pulsar:
+
+```text
+Finalizar
+```
+
+la solicitud cambiaba inmediatamente a:
+
+```text
+Finalizada
+```
+
+sin solicitar confirmación.
+
+## Riesgo identificado
+
+Un clic accidental podía marcar como finalizado un trabajo todavía activo.
+
+Después de finalizar:
+
+- El Técnico ya no podía agregar comentarios.
+- La solicitud quedaba registrada como completada.
+- Era necesaria la intervención del Administrador para reabrirla.
+
+## Severidad
+
+**Media**
+
+## Corrección
+
+Se incorporó un paso de confirmación.
+
+Al pulsar:
+
+```text
+Finalizar
+```
+
+se muestra:
+
+```text
+¿Finalizar esta solicitud?
+
+Después de finalizarla no podrá agregar más comentarios,
+salvo que un administrador la reabra.
+
+Cancelar
+Finalizar solicitud
+```
+
+## Regresión — Cancelar
+
+Se seleccionó:
+
+```text
+Cancelar
+```
+
+Resultado esperado:
+
+```text
+Estado: En Proceso
+```
+
+Resultado obtenido:
+
+**PASS**
+
+La solicitud permaneció activa y el Técnico pudo continuar agregando comentarios.
+
+## Regresión — Confirmar
+
+Se volvió a pulsar:
+
+```text
+Finalizar
+```
+
+y después:
+
+```text
+Finalizar solicitud
+```
+
+Resultado esperado:
+
+```text
+Estado: Finalizada
+```
+
+Resultado obtenido:
+
+**PASS**
+
+La interfaz mostró:
+
+```text
+✓ Trabajo completado
+```
+
+y dejó de presentar controles para agregar comentarios.
+
+## Estado final
+
+**CERRADO**
+
+---
+
+# Evaluación de usabilidad
+
+Los defectos DEF-13 y DEF-14 fueron identificados durante una evaluación heurística de las interfaces correspondientes a:
+
+- Login.
+- Solicitante.
+- Historial.
+- Administrador.
+- Cierre administrativo.
+- Técnico.
+
+La evaluación no utilizó participantes externos y no se presenta como un estudio formal con usuarios.
+
+La evidencia detallada se encuentra en:
+
+```text
+docs/USABILITY_TESTING.md
+```
+
+Resultado:
+
+```text
+Defectos encontrados: 2
+Defectos corregidos:  2
+Defectos abiertos:     0
+```
+
+---
+
+# Regresión técnica posterior a las correcciones
+
+Después de corregir DEF-13 y DEF-14 se ejecutó nuevamente la regresión automatizada.
 
 ## Análisis estático
 
@@ -663,10 +708,9 @@ Resultado:
 
 ```text
 Found 0 warnings and 0 errors.
-Finished in 16ms on 29 files with 92 rules using 16 threads.
+29 files
+92 rules
 ```
-
-Resultado:
 
 **PASS**
 
@@ -687,8 +731,6 @@ Test Files  2 passed (2)
 Tests       14 passed (14)
 ```
 
-Resultado:
-
 **PASS**
 
 ---
@@ -704,12 +746,9 @@ Vite
 Resultado:
 
 ```text
-vite v8.2.1 building client environment for production...
 45 modules transformed.
 ✓ built
 ```
-
-Resultado:
 
 **PASS**
 
@@ -729,8 +768,6 @@ Resultado:
 2 passed
 ```
 
-Resultado:
-
 **PASS**
 
 ---
@@ -738,13 +775,13 @@ Resultado:
 # Resultado de la regresión final
 
 ```text
-Oxlint       0 warnings / 0 errors
-Vitest       14/14 pruebas
-Vite build   PASS
-Playwright   2/2 pruebas
+Oxlint      0 warnings / 0 errors
+Vitest      14/14 pruebas
+Vite build  PASS
+Playwright  2/2 pruebas
 ```
 
-Las correcciones de autenticación y autorización no introdujeron regresiones detectables en las funcionalidades cubiertas por las pruebas automatizadas existentes.
+Las correcciones de usabilidad no introdujeron regresiones detectables en las funcionalidades cubiertas por las pruebas automatizadas existentes.
 
 ---
 
@@ -752,22 +789,22 @@ Las correcciones de autenticación y autorización no introdujeron regresiones d
 
 | Métrica | Resultado |
 |---|---:|
-| Total de defectos registrados | 12 |
-| Defectos cerrados | 12 |
+| Total de defectos registrados | 14 |
+| Defectos cerrados | 14 |
 | Defectos abiertos | 0 |
 | Severidad alta | 3 |
-| Severidad media | 4 |
-| Severidad baja | 5 |
+| Severidad media | 5 |
+| Severidad baja | 6 |
 | Críticos o bloqueantes pendientes | 0 |
 
 ## Distribución por severidad
 
 ```text
-Alta     3
-Media    4
-Baja     5
+Alta      3
+Media     5
+Baja      6
 ──────────
-Total   12
+Total    14
 ```
 
 ## Estado general
@@ -781,3 +818,5 @@ La última regresión técnica finalizó satisfactoriamente con:
 - **Build de producción exitoso.**
 - **2 de 2 pruebas End-to-End aprobadas.**
 - **Pruebas manuales de autenticación y autorización aprobadas.**
+- **Evaluación heurística de usabilidad ejecutada.**
+- **DEF-13 y DEF-14 corregidos y validados.**

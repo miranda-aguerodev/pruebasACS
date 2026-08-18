@@ -15,6 +15,8 @@ export default function TechnicianRequestActions({
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [confirmingFinish, setConfirmingFinish] =
+    useState(false);
 
   function showFeedback(message, type = "success") {
     setFeedback({
@@ -37,10 +39,25 @@ export default function TechnicianRequestActions({
       });
 
       await onUpdated();
+
+      return true;
     } catch (error) {
       showFeedback(error.message, "error");
+      return false;
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleConfirmFinish() {
+    const success = await changeStatus("finalizada");
+
+    if (success) {
+      setConfirmingFinish(false);
+
+      showFeedback(
+        "Solicitud finalizada correctamente."
+      );
     }
   }
 
@@ -87,17 +104,62 @@ export default function TechnicianRequestActions({
         </button>
       )}
 
-      {request.estado === "en_proceso" && (
-        <button
-          className="button button-success button-small"
-          disabled={saving}
-          onClick={() => changeStatus("finalizada")}
-        >
-          {saving ? "Procesando..." : "Finalizar"}
-        </button>
-      )}
+      {request.estado === "en_proceso" &&
+        !confirmingFinish && (
+          <button
+            className="button button-success button-small"
+            disabled={saving}
+            onClick={() => setConfirmingFinish(true)}
+          >
+            Finalizar
+          </button>
+        )}
 
-      {!isCompleted && (
+      {request.estado === "en_proceso" &&
+        confirmingFinish && (
+          <div
+            className="finish-confirmation"
+            role="alert"
+          >
+            <div className="finish-confirmation-text">
+              <strong>
+                ¿Finalizar esta solicitud?
+              </strong>
+
+              <span>
+                Después de finalizarla no podrá agregar
+                más comentarios, salvo que un
+                administrador la reabra.
+              </span>
+            </div>
+
+            <div className="finish-confirmation-actions">
+              <button
+                type="button"
+                className="button button-secondary button-small"
+                disabled={saving}
+                onClick={() =>
+                  setConfirmingFinish(false)
+                }
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                className="button button-success button-small"
+                disabled={saving}
+                onClick={handleConfirmFinish}
+              >
+                {saving
+                  ? "Finalizando..."
+                  : "Finalizar solicitud"}
+              </button>
+            </div>
+          </div>
+        )}
+
+      {!isCompleted && !confirmingFinish && (
         <div className="comment-box">
           <input
             type="text"

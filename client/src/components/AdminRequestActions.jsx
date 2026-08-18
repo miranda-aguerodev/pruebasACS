@@ -245,6 +245,17 @@ export default function AdminRequestActions({
       allowedStatusValues.includes(status.value)
   );
 
+  const originalTechnicianId =
+    request.tecnico_id === null ||
+    request.tecnico_id === undefined
+      ? ""
+      : String(request.tecnico_id);
+
+  const hasChanges =
+    form.prioridad !== request.prioridad ||
+    form.estado !== request.estado ||
+    String(form.tecnico_id) !== originalTechnicianId;
+
   if (request.estado === "cerrada") {
     return (
       <div className="request-actions">
@@ -317,64 +328,95 @@ export default function AdminRequestActions({
 
   return (
     <div className="request-actions">
-      <select
-        name="prioridad"
-        value={form.prioridad}
-        onChange={handleChange}
-        disabled={saving}
+      <label
+        className="request-action-field"
+        htmlFor={`priority-${request.id}`}
       >
-        {PRIORITIES.map((priority) => (
-          <option
-            key={priority.value}
-            value={priority.value}
-          >
-            {priority.label}
-          </option>
-        ))}
-      </select>
+        <span>Prioridad</span>
 
-      <select
-        name="estado"
-        value={form.estado}
-        onChange={handleChange}
-        disabled={saving}
+        <select
+          id={`priority-${request.id}`}
+          name="prioridad"
+          value={form.prioridad}
+          onChange={handleChange}
+          disabled={saving}
+        >
+          {PRIORITIES.map((priority) => (
+            <option
+              key={priority.value}
+              value={priority.value}
+            >
+              {priority.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label
+        className="request-action-field"
+        htmlFor={`status-${request.id}`}
       >
-        {availableStatuses.map((status) => (
-          <option
-            key={status.value}
-            value={status.value}
-          >
-            {status.label}
-          </option>
-        ))}
-      </select>
+        <span>Estado</span>
 
-      <select
-        name="tecnico_id"
-        value={form.tecnico_id}
-        onChange={handleChange}
-        disabled={saving}
+        <select
+          id={`status-${request.id}`}
+          name="estado"
+          value={form.estado}
+          onChange={handleChange}
+          disabled={saving}
+        >
+          {availableStatuses.map((status) => (
+            <option
+              key={status.value}
+              value={status.value}
+            >
+              {status.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label
+        className="request-action-field"
+        htmlFor={`technician-${request.id}`}
       >
-        <option value="">
-          Sin asignar
-        </option>
+        <span>Técnico</span>
 
-        {technicians.map((technician) => (
-          <option
-            key={technician.id}
-            value={technician.id}
-          >
-            {technician.nombre}
+        <select
+          id={`technician-${request.id}`}
+          name="tecnico_id"
+          value={form.tecnico_id}
+          onChange={handleChange}
+          disabled={saving}
+        >
+          <option value="">
+            Sin asignar
           </option>
-        ))}
-      </select>
+
+          {technicians.map((technician) => (
+            <option
+              key={technician.id}
+              value={technician.id}
+            >
+              {technician.nombre}
+            </option>
+          ))}
+        </select>
+      </label>
 
       <button
         className="button button-primary button-small"
         onClick={handleSave}
-        disabled={saving}
+        disabled={saving || !hasChanges}
+        title={
+          hasChanges
+            ? "Guardar los cambios realizados"
+            : "No hay cambios pendientes"
+        }
       >
-        {saving ? "Guardando..." : "Guardar"}
+        {saving
+          ? "Guardando..."
+          : "Guardar cambios"}
       </button>
 
       {request.estado === "pendiente" && (
@@ -395,75 +437,103 @@ export default function AdminRequestActions({
 
           {showAdministrativeClose && (
             <div className="administrative-close-box">
-              <select
-                value={closeReason}
-                onChange={(event) => {
-                  setCloseReason(event.target.value);
-
-                  if (
-                    event.target.value !== "Otro"
-                  ) {
-                    setOtherReason("");
-                  }
-
-                  if (
-                    event.target.value !==
-                    "Solicitud duplicada"
-                  ) {
-                    setRelatedRequestId("");
-                  }
-                }}
-                disabled={saving}
+              <label
+                className="request-action-field"
+                htmlFor={`close-reason-${request.id}`}
               >
-                <option value="">
-                  Seleccione motivo...
-                </option>
+                <span>Motivo de cierre</span>
 
-                <option value="Solicitud duplicada">
-                  Solicitud duplicada
-                </option>
+                <select
+                  id={`close-reason-${request.id}`}
+                  value={closeReason}
+                  onChange={(event) => {
+                    setCloseReason(
+                      event.target.value
+                    );
 
-                <option value="Reporte inválido">
-                  Reporte inválido
-                </option>
+                    if (
+                      event.target.value !== "Otro"
+                    ) {
+                      setOtherReason("");
+                    }
 
-                <option value="Ya resuelto">
-                  Ya resuelto
-                </option>
+                    if (
+                      event.target.value !==
+                      "Solicitud duplicada"
+                    ) {
+                      setRelatedRequestId("");
+                    }
+                  }}
+                  disabled={saving}
+                >
+                  <option value="">
+                    Seleccione motivo...
+                  </option>
 
-                <option value="Otro">
-                  Otro
-                </option>
-              </select>
+                  <option value="Solicitud duplicada">
+                    Solicitud duplicada
+                  </option>
+
+                  <option value="Reporte inválido">
+                    Reporte inválido
+                  </option>
+
+                  <option value="Ya resuelto">
+                    Ya resuelto
+                  </option>
+
+                  <option value="Otro">
+                    Otro
+                  </option>
+                </select>
+              </label>
 
               {closeReason === "Otro" && (
-                <input
-                  type="text"
-                  value={otherReason}
-                  onChange={(event) =>
-                    setOtherReason(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Especifique el motivo..."
-                  disabled={saving}
-                />
+                <label
+                  className="request-action-field"
+                  htmlFor={`other-reason-${request.id}`}
+                >
+                  <span>Detalle del motivo</span>
+
+                  <input
+                    id={`other-reason-${request.id}`}
+                    type="text"
+                    value={otherReason}
+                    onChange={(event) =>
+                      setOtherReason(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Especifique el motivo..."
+                    disabled={saving}
+                  />
+                </label>
               )}
 
               {closeReason ===
                 "Solicitud duplicada" && (
-                <input
-                  type="number"
-                  min="1"
-                  value={relatedRequestId}
-                  onChange={(event) =>
-                    setRelatedRequestId(
-                      event.target.value
-                    )
-                  }
-                  placeholder="Solicitud relacionada #"
-                  disabled={saving}
-                />
+                <label
+                  className="request-action-field"
+                  htmlFor={`related-request-${request.id}`}
+                >
+                  <span>
+                    Solicitud relacionada
+                  </span>
+
+                  <input
+                    id={`related-request-${request.id}`}
+                    type="number"
+                    min="1"
+                    value={relatedRequestId}
+                    onChange={(event) =>
+                      setRelatedRequestId(
+                        event.target.value
+                      )
+                    }
+                    placeholder="Ej. 6"
+                    disabled={saving}
+                  />
+                </label>
               )}
 
               <button
