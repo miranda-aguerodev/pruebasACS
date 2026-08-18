@@ -1,5 +1,8 @@
 import StatusBadge from "./StatusBadge";
-import { formatPriority } from "../helpers/formatters";
+
+import {
+  formatPriority,
+} from "../helpers/formatters";
 
 export default function RequestTable({
   requests,
@@ -37,10 +40,23 @@ export default function RequestTable({
               <td>#{request.id}</td>
 
               <td className="description-cell">
-                {request.descripcion}
+                <span
+                  className="table-text-clamp"
+                  title={request.descripcion}
+                >
+                  {request.descripcion}
+                </span>
               </td>
 
-              <td>{request.ubicacion}</td>
+              <td className="location-cell">
+                <span
+                  className="table-text-clamp"
+                  title={request.ubicacion}
+                >
+                  {request.ubicacion}
+                </span>
+              </td>
+
               <td>{request.categoria}</td>
 
               <td>
@@ -52,7 +68,9 @@ export default function RequestTable({
               </td>
 
               <td>
-                <StatusBadge status={request.estado} />
+                <StatusBadge
+                  status={request.estado}
+                />
               </td>
 
               <td>
@@ -64,9 +82,7 @@ export default function RequestTable({
               </td>
 
               {actions && (
-                <td>
-                  {actions(request)}
-                </td>
+                <td>{actions(request)}</td>
               )}
             </tr>
           ))}

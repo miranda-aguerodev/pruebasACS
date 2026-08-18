@@ -1,10 +1,16 @@
 import { useState } from "react";
+
 import { CATEGORIES } from "../helpers/constants";
 
 const INITIAL_FORM = {
   descripcion: "",
   ubicacion: "",
   categoria: "",
+};
+
+const LIMITS = {
+  descripcion: 255,
+  ubicacion: 120,
 };
 
 export default function RequestForm({
@@ -47,8 +53,13 @@ export default function RequestForm({
             onChange={handleChange}
             placeholder="Describa el problema de mantenimiento..."
             rows="4"
+            maxLength={LIMITS.descripcion}
             required
           />
+
+          <span className="field-counter">
+            {form.descripcion.length}/{LIMITS.descripcion}
+          </span>
         </label>
 
         <label className="form-field">
@@ -60,8 +71,13 @@ export default function RequestForm({
             value={form.ubicacion}
             onChange={handleChange}
             placeholder="Ej. Aula 203"
+            maxLength={LIMITS.ubicacion}
             required
           />
+
+          <span className="field-counter">
+            {form.ubicacion.length}/{LIMITS.ubicacion}
+          </span>
         </label>
 
         <label className="form-field">

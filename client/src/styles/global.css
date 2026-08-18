@@ -656,3 +656,165 @@ select:focus {
     grid-template-columns: 1fr;
   }
 }
+
+.field-counter {
+  align-self: flex-end;
+  margin-top: -4px;
+  color: #8a92a3;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.description-cell {
+  width: 220px;
+  max-width: 220px;
+}
+
+.location-cell {
+  width: 150px;
+  max-width: 150px;
+}
+
+.table-text-clamp {
+  display: -webkit-box;
+
+  overflow: hidden;
+
+  max-width: 100%;
+
+  line-height: 1.4;
+
+  overflow-wrap: anywhere;
+  word-break: break-word;
+
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.request-table td {
+  vertical-align: middle;
+}
+
+.app-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 9999;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  min-width: 280px;
+  max-width: 380px;
+  padding: 14px 16px;
+
+  border: 1px solid #dfe5ee;
+  border-radius: 12px;
+
+  background: #ffffff;
+  color: #172033;
+
+  font-size: 13px;
+  font-weight: 600;
+
+  box-shadow:
+    0 12px 35px rgba(15, 23, 42, 0.15);
+
+  animation: toast-in 0.2s ease-out;
+}
+
+.app-toast-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 24px;
+  height: 24px;
+
+  border-radius: 50%;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.app-toast-success .app-toast-icon {
+  background: #e3f7eb;
+  color: #198754;
+}
+
+.app-toast-error .app-toast-icon {
+  background: #fde8e8;
+  color: #c73737;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ============================= */
+/* HISTORIAL - TEXTOS LARGOS     */
+/* ============================= */
+
+.history-modal {
+  max-width: min(900px, calc(100vw - 40px));
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.history-header {
+  min-width: 0;
+}
+
+.history-header > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.history-header h2 {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-header p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-summary > div {
+  min-width: 0;
+}
+
+.history-summary strong {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.history-content {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+.history-entry {
+  min-width: 0;
+}
+
+.history-entry > div:last-child {
+  min-width: 0;
+  width: 100%;
+}
+
+.history-entry p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

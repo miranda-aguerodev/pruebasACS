@@ -14,6 +14,18 @@ export default function TechnicianRequestActions({
 }) {
   const [comment, setComment] = useState("");
   const [saving, setSaving] = useState(false);
+  const [feedback, setFeedback] = useState(null);
+
+  function showFeedback(message, type = "success") {
+    setFeedback({
+      message,
+      type,
+    });
+
+    setTimeout(() => {
+      setFeedback(null);
+    }, 2500);
+  }
 
   async function changeStatus(status) {
     try {
@@ -26,7 +38,7 @@ export default function TechnicianRequestActions({
 
       await onUpdated();
     } catch (error) {
-      alert(error.message);
+      showFeedback(error.message, "error");
     } finally {
       setSaving(false);
     }
@@ -47,9 +59,11 @@ export default function TechnicianRequestActions({
 
       setComment("");
 
-      alert("Comentario registrado correctamente.");
+      showFeedback(
+        "Comentario registrado correctamente."
+      );
     } catch (error) {
-      alert(error.message);
+      showFeedback(error.message, "error");
     } finally {
       setSaving(false);
     }
@@ -117,6 +131,20 @@ export default function TechnicianRequestActions({
       )}
 
       <RequestHistory request={request} />
+
+      {feedback && (
+        <div
+          className={`app-toast app-toast-${feedback.type}`}
+          role="status"
+          aria-live="polite"
+        >
+          <span className="app-toast-icon">
+            {feedback.type === "success" ? "✓" : "!"}
+          </span>
+
+          <span>{feedback.message}</span>
+        </div>
+      )}
     </div>
   );
 }

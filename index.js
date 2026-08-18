@@ -168,6 +168,20 @@ app.post("/api/solicitudes", (req, res) => {
     });
   }
 
+  if (descripcion.length > 255) {
+    return res.status(400).json({
+      error:
+        "La descripción no puede superar los 255 caracteres",
+    });
+  }
+
+  if (ubicacion.length > 120) {
+    return res.status(400).json({
+      error:
+        "La ubicación no puede superar los 120 caracteres",
+    });
+  }
+
   const sql = `
     INSERT INTO solicitudes
       (
@@ -248,6 +262,8 @@ app.put("/api/solicitudes/:id", (req, res) => {
     estado,
     tecnico_id,
     usuario_id,
+    motivo_cierre,
+    solicitud_relacionada_id,
   } = req.body;
 
   const currentSql = `
@@ -260,161 +276,347 @@ app.put("/api/solicitudes/:id", (req, res) => {
     WHERE id = ?
   `;
 
-  db.query(currentSql, [solicitudId], (currentError, currentResults) => {
-    if (currentError) {
-      console.error(currentError);
-
-      return res.status(500).json({
-        error: "Error al consultar la solicitud",
-      });
-    }
-
-    if (currentResults.length === 0) {
-      return res.status(404).json({
-        error: "Solicitud no encontrada",
-      });
-    }
-
-    const current = currentResults[0];
-
-    const fields = [];
-    const values = [];
-
-    if (prioridad !== undefined) {
-      fields.push("prioridad = ?");
-      values.push(prioridad);
-    }
-
-    if (estado !== undefined) {
-      fields.push("estado = ?");
-      values.push(estado);
-    }
-
-    if (tecnico_id !== undefined) {
-      fields.push("tecnico_id = ?");
-      values.push(tecnico_id);
-    }
-
-    if (fields.length === 0) {
-      return res.status(400).json({
-        error: "No hay datos para actualizar",
-      });
-    }
-
-    values.push(solicitudId);
-
-    const updateSql = `
-      UPDATE solicitudes
-      SET ${fields.join(", ")}
-      WHERE id = ?
-    `;
-
-    db.query(updateSql, values, (updateError, updateResult) => {
-      if (updateError) {
-        console.error(updateError);
+  db.query(
+    currentSql,
+    [solicitudId],
+    (currentError, currentResults) => {
+      if (currentError) {
+        console.error(currentError);
 
         return res.status(500).json({
-          error: "Error al actualizar la solicitud",
+          error: "Error al consultar la solicitud",
         });
       }
 
-      if (updateResult.affectedRows === 0) {
+      if (currentResults.length === 0) {
         return res.status(404).json({
           error: "Solicitud no encontrada",
         });
       }
 
-      const events = [];
+      const current = currentResults[0];
 
-      if (
-        prioridad !== undefined &&
-        prioridad !== current.prioridad
-      ) {
-        events.push(
-          `Prioridad cambiada de ${current.prioridad} a ${prioridad}`
-        );
+      // Una solicitud cerrada queda bloqueada.
+      if (current.estado === "cerrada") {
+        return res.status(400).json({
+          error:
+            "Una solicitud cerrada no puede modificarse",
+        });
       }
 
-      if (
-        tecnico_id !== undefined &&
-        Number(tecnico_id) !== Number(current.tecnico_id)
-      ) {
-        if (tecnico_id === null || tecnico_id === "") {
-          events.push("Técnico desasignado");
-        } else if (!current.tecnico_id) {
-          events.push("Técnico asignado");
-        } else {
-          events.push("Técnico reasignado");
-        }
-      }
+      const effectiveTechnician =
+        tecnico_id !== undefined
+          ? tecnico_id
+          : current.tecnico_id;
+
+      const normalizedCloseReason =
+        typeof motivo_cierre === "string"
+          ? motivo_cierre.trim()
+          : "";
+
+      /*
+       * Transiciones permitidas:
+       *
+       * pendiente  -> en_proceso
+       * pendiente  -> cerrada
+       *               solo cierre administrativo justificado
+       *
+       * en_proceso -> finalizada
+       *
+       * finalizada -> en_proceso
+       *               reapertura
+       *
+       * finalizada -> cerrada
+       */
+      const allowedTransitions = {
+        pendiente: ["en_proceso", "cerrada"],
+        en_proceso: ["finalizada"],
+        finalizada: ["en_proceso", "cerrada"],
+        cerrada: [],
+      };
 
       if (
         estado !== undefined &&
         estado !== current.estado
       ) {
-        if (estado === "cerrada") {
-          events.push("Solicitud cerrada");
-        } else if (
-          current.estado === "finalizada" &&
-          estado === "en_proceso"
+        const allowed =
+          allowedTransitions[current.estado] || [];
+
+        if (!allowed.includes(estado)) {
+          return res.status(400).json({
+            error:
+              `Transición de estado no permitida: ` +
+              `${current.estado} → ${estado}`,
+          });
+        }
+
+        // Pendiente -> Cerrada requiere justificación.
+        if (
+          current.estado === "pendiente" &&
+          estado === "cerrada" &&
+          !normalizedCloseReason
         ) {
-          events.push("Solicitud reabierta");
-        } else {
-          events.push(
-            `Estado cambiado de ${current.estado} a ${estado}`
-          );
+          return res.status(400).json({
+            error:
+              "Debe indicar el motivo para cerrar una solicitud pendiente",
+          });
+        }
+
+        // Para comenzar o finalizar trabajo se requiere técnico.
+        if (
+          ["en_proceso", "finalizada"].includes(estado) &&
+          (
+            effectiveTechnician === null ||
+            effectiveTechnician === "" ||
+            effectiveTechnician === undefined
+          )
+        ) {
+          return res.status(400).json({
+            error:
+              "Debe asignar un técnico antes de cambiar la solicitud a ese estado",
+          });
         }
       }
 
-      if (events.length === 0) {
-        return res.json({
-          message: "Solicitud actualizada correctamente",
-        });
-      }
+      function continueUpdate() {
+        const fields = [];
+        const values = [];
 
-      const historySql = `
-        INSERT INTO historial_solicitudes
-          (
-            solicitud_id,
-            usuario_id,
-            tipo,
-            descripcion
-          )
-        VALUES (?, ?, ?, ?)
-      `;
+        if (prioridad !== undefined) {
+          fields.push("prioridad = ?");
+          values.push(prioridad);
+        }
 
-      let pending = events.length;
+        if (estado !== undefined) {
+          fields.push("estado = ?");
+          values.push(estado);
+        }
 
-      events.forEach((description) => {
+        if (tecnico_id !== undefined) {
+          fields.push("tecnico_id = ?");
+          values.push(
+            tecnico_id === "" ? null : tecnico_id
+          );
+        }
+
+        if (fields.length === 0) {
+          return res.status(400).json({
+            error: "No hay datos para actualizar",
+          });
+        }
+
+        values.push(solicitudId);
+
+        const updateSql = `
+          UPDATE solicitudes
+          SET ${fields.join(", ")}
+          WHERE id = ?
+        `;
+
         db.query(
-          historySql,
-          [
-            solicitudId,
-            usuario_id || null,
-            "cambio",
-            description,
-          ],
-          (historyError) => {
-            if (historyError) {
-              console.error(
-                "Error registrando historial:",
-                historyError
+          updateSql,
+          values,
+          (updateError, updateResult) => {
+            if (updateError) {
+              console.error(updateError);
+
+              return res.status(500).json({
+                error:
+                  "Error al actualizar la solicitud",
+              });
+            }
+
+            if (updateResult.affectedRows === 0) {
+              return res.status(404).json({
+                error: "Solicitud no encontrada",
+              });
+            }
+
+            const events = [];
+
+            if (
+              prioridad !== undefined &&
+              prioridad !== current.prioridad
+            ) {
+              events.push(
+                `Prioridad cambiada de ${current.prioridad} a ${prioridad}`
               );
             }
 
-            pending -= 1;
+            if (
+              tecnico_id !== undefined &&
+              Number(tecnico_id) !==
+                Number(current.tecnico_id)
+            ) {
+              if (
+                tecnico_id === null ||
+                tecnico_id === ""
+              ) {
+                events.push("Técnico desasignado");
+              } else if (!current.tecnico_id) {
+                events.push("Técnico asignado");
+              } else {
+                events.push("Técnico reasignado");
+              }
+            }
 
-            if (pending === 0) {
-              res.json({
+            if (
+              estado !== undefined &&
+              estado !== current.estado
+            ) {
+              // Cierre administrativo desde Pendiente.
+              if (
+                current.estado === "pendiente" &&
+                estado === "cerrada"
+              ) {
+                let description =
+                  `Solicitud cerrada. Motivo: ${normalizedCloseReason}`;
+
+                if (
+                  normalizedCloseReason ===
+                    "Solicitud duplicada" &&
+                  solicitud_relacionada_id
+                ) {
+                  description +=
+                    `. Caso relacionado: Solicitud #${solicitud_relacionada_id}`;
+                }
+
+                events.push(description);
+              }
+
+              // Cierre normal.
+              else if (estado === "cerrada") {
+                events.push("Solicitud cerrada");
+              }
+
+              // Reapertura.
+              else if (
+                current.estado === "finalizada" &&
+                estado === "en_proceso"
+              ) {
+                events.push("Solicitud reabierta");
+              }
+
+              // Cambio normal.
+              else {
+                events.push(
+                  `Estado cambiado de ${current.estado} a ${estado}`
+                );
+              }
+            }
+
+            if (events.length === 0) {
+              return res.json({
                 message:
                   "Solicitud actualizada correctamente",
               });
             }
+
+            const historySql = `
+              INSERT INTO historial_solicitudes
+                (
+                  solicitud_id,
+                  usuario_id,
+                  tipo,
+                  descripcion
+                )
+              VALUES (?, ?, ?, ?)
+            `;
+
+            let pending = events.length;
+
+            events.forEach((description) => {
+              db.query(
+                historySql,
+                [
+                  solicitudId,
+                  usuario_id || null,
+                  "cambio",
+                  description,
+                ],
+                (historyError) => {
+                  if (historyError) {
+                    console.error(
+                      "Error registrando historial:",
+                      historyError
+                    );
+                  }
+
+                  pending -= 1;
+
+                  if (pending === 0) {
+                    res.json({
+                      message:
+                        "Solicitud actualizada correctamente",
+                    });
+                  }
+                }
+              );
+            });
           }
         );
-      });
-    });
-  });
+      }
+
+      // Si se cierra como duplicada,
+      // la solicitud relacionada debe existir.
+      if (
+        current.estado === "pendiente" &&
+        estado === "cerrada" &&
+        normalizedCloseReason === "Solicitud duplicada"
+      ) {
+        if (!solicitud_relacionada_id) {
+          return res.status(400).json({
+            error:
+              "Debe indicar la solicitud relacionada",
+          });
+        }
+
+        // No puede relacionarse consigo misma.
+        if (
+          Number(solicitud_relacionada_id) ===
+          Number(solicitudId)
+        ) {
+          return res.status(400).json({
+            error:
+              "Una solicitud no puede relacionarse consigo misma",
+          });
+        }
+
+        const relatedSql = `
+          SELECT id
+          FROM solicitudes
+          WHERE id = ?
+          LIMIT 1
+        `;
+
+        return db.query(
+          relatedSql,
+          [solicitud_relacionada_id],
+          (relatedError, relatedResults) => {
+            if (relatedError) {
+              console.error(relatedError);
+
+              return res.status(500).json({
+                error:
+                  "Error al validar la solicitud relacionada",
+              });
+            }
+
+            if (relatedResults.length === 0) {
+              return res.status(400).json({
+                error:
+                  "La solicitud relacionada no existe",
+              });
+            }
+
+            return continueUpdate();
+          }
+        );
+      }
+
+      return continueUpdate();
+    }
+  );
 });
 
 // =============================
@@ -506,58 +708,64 @@ app.post(
   }
 );
 
+// =============================
+// HISTORIAL
+// =============================
 
-app.get("/api/solicitudes/:id/historial", (req, res) => {
-  const solicitudId = req.params.id;
+app.get(
+  "/api/solicitudes/:id/historial",
+  (req, res) => {
+    const solicitudId = req.params.id;
 
-  const sql = `
-    SELECT
-      h.id,
-      h.descripcion AS contenido,
-      h.tipo,
-      h.fecha,
-      u.nombre,
-      u.rol,
-      'evento' AS origen
-    FROM historial_solicitudes h
-    LEFT JOIN usuarios u
-      ON h.usuario_id = u.id
-    WHERE h.solicitud_id = ?
+    const sql = `
+      SELECT
+        h.id,
+        h.descripcion AS contenido,
+        h.tipo,
+        h.fecha,
+        u.nombre,
+        u.rol,
+        'evento' AS origen
+      FROM historial_solicitudes h
+      LEFT JOIN usuarios u
+        ON h.usuario_id = u.id
+      WHERE h.solicitud_id = ?
 
-    UNION ALL
+      UNION ALL
 
-    SELECT
-      c.id,
-      c.comentario AS contenido,
-      'comentario' AS tipo,
-      c.fecha,
-      u.nombre,
-      u.rol,
-      'comentario' AS origen
-    FROM comentarios c
-    INNER JOIN usuarios u
-      ON c.usuario_id = u.id
-    WHERE c.solicitud_id = ?
+      SELECT
+        c.id,
+        c.comentario AS contenido,
+        'comentario' AS tipo,
+        c.fecha,
+        u.nombre,
+        u.rol,
+        'comentario' AS origen
+      FROM comentarios c
+      INNER JOIN usuarios u
+        ON c.usuario_id = u.id
+      WHERE c.solicitud_id = ?
 
-    ORDER BY fecha ASC
-  `;
+      ORDER BY fecha ASC
+    `;
 
-  db.query(
-    sql,
-    [solicitudId, solicitudId],
-    (error, results) => {
-      if (error) {
-        console.error(error);
+    db.query(
+      sql,
+      [solicitudId, solicitudId],
+      (error, results) => {
+        if (error) {
+          console.error(error);
 
-        return res.status(500).json({
-          error: "Error al obtener el historial",
-        });
+          return res.status(500).json({
+            error: "Error al obtener el historial",
+          });
+        }
+
+        res.json(results);
       }
-
-      res.json(results);
-    }
-  );
-});
+    );
+  }
+);
 
 // =============================
 // SERVIDOR
